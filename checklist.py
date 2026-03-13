@@ -377,7 +377,8 @@ elif pagina == "Histórico de Dados":
             
             st.divider()
             
-            csv = df.to_csv(index=False).encode('utf-8')
+            csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig').encode('utf-8-sig')
+            
             st.download_button(
                 label="📥 Baixar dados em CSV",
                 data=csv,
