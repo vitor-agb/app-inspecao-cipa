@@ -3,21 +3,23 @@ from datetime import datetime
 from streamlit_option_menu import option_menu
 import pandas as pd
 import altair as alt
-from sqlalchemy import text # <--- Novo import para falar com o banco de dados da nuvem
+from sqlalchemy import text 
 
 # Configuração inicial da página
 st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
 esconder_estilo = """
     <style>
-    /* Oculta APENAS o menu de três pontos (direito) */
-    #MainMenu {visibility: hidden;}
+    /* Oculta o menu de três pontos e o botão de Deploy */
+    [data-testid="stToolbar"] {display: none !important;}
+    .stAppDeployButton {display: none !important;}
     
-    /* Oculta o botão de Deploy */
-    .stAppDeployButton {display: none;}
+    /* Oculta o atalho do GitHub (Fork) e o "Hosted with Streamlit" */
+    .viewerBadge_container {display: none !important;}
+    .viewerBadge_link {display: none !important;}
     
-    /* Oculta o rodapé padrão inferior */
-    footer {visibility: hidden;}
+    /* Oculta o rodapé inferior */
+    footer {display: none !important;}
     </style>
     """
 st.markdown(esconder_estilo, unsafe_allow_html=True)
@@ -63,7 +65,7 @@ lista_perguntas = [
 # FUNÇÕES DO BANCO DE DADOS (SUPABASE NA NUVEM)
 # ==========================================
 def salvar_dados(dados_dict):
-    # Conecta com a nuvem usando a senha que está escondida na pasta .streamlit
+    # Conecta com a nuvem
     conn = st.connection("supabase", type="sql")
     
     colunas = ', '.join(dados_dict.keys())
@@ -147,7 +149,6 @@ if pagina == "Nova Inspeção":
         ])
         
     with col2:
-        # Formato PT-BR forçado no calendário
         data_execucao = st.date_input("Data da Realização", format="DD/MM/YYYY")
         cipeiro = st.selectbox("Cipeiro Responsável", [
             "Ana Claudia","Clarissa Arthur","Daiana de Oliveira","Isaias de Oliveira","Keila Silva","Leandro Alves","Mirelen da Silva","Rafael Zompero","Rosangela Rezende","Ueslley da Silva","Vitor Barbeiro","Weslen dos Santos"
@@ -208,7 +209,6 @@ if pagina == "Nova Inspeção":
                 
             dados_para_salvar["obs_geral"] = motivo_justificativa if justificada else obs_geral
             
-            # Aqui ele envia o pacote de dados para o Supabase
             salvar_dados(dados_para_salvar)
             
             if justificada:
