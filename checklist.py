@@ -11,6 +11,7 @@ st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 esconder_estilo = """
     <style>  
     /* Oculta o atalho do GitHub (Fork) e o "Hosted with Streamlit" */
+    data-testid="stToolbarActions"] {display: none !important;}
     .viewerBadge_container {display: none !important;}
     .viewerBadge_link {display: none !important;}
     
