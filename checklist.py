@@ -9,11 +9,7 @@ from sqlalchemy import text
 st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
 esconder_estilo = """
-    <style>
-    /* Oculta o menu de três pontos e o botão de Deploy */
-    [data-testid="stToolbar"] {display: none !important;}
-    .stAppDeployButton {display: none !important;}
-    
+    <style>  
     /* Oculta o atalho do GitHub (Fork) e o "Hosted with Streamlit" */
     .viewerBadge_container {display: none !important;}
     .viewerBadge_link {display: none !important;}
