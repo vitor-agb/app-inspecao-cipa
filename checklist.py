@@ -11,7 +11,7 @@ st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 esconder_estilo = """
     <style>  
     /* Oculta o atalho do GitHub (Fork) e o "Hosted with Streamlit" */
-    data-testid="stToolbarActions"] {display: none !important;}
+    [data-testid="stToolbarActions"] {display: none !important;}
     .viewerBadge_container {display: none !important;}
     .viewerBadge_link {display: none !important;}
     
@@ -20,6 +20,39 @@ esconder_estilo = """
     </style>
     """
 st.markdown(esconder_estilo, unsafe_allow_html=True)
+
+# ==========================================
+# SISTEMA DE LOGIN (TELA DE BLOQUEIO)
+# ==========================================
+def check_password():
+    """Retorna True se o usuário inseriu a senha correta."""
+    def password_entered():
+        if st.session_state["senha"] == st.secrets["senha_acesso"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["senha"]  # Apaga a senha da memória por segurança
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # Primeira execução, mostra a tela de login
+        st.title("🔒 Acesso Restrito - CIPA")
+        st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Senha errada, mostra o aviso
+        st.title("🔒 Acesso Restrito - CIPA")
+        st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
+        st.error("😕 Senha incorreta. Tente novamente.")
+        return False
+    else:
+        # Senha correta, libera o sistema
+        return True
+
+# Se a senha não estiver correta, ele PARA de ler o código aqui.
+# Nada abaixo desta linha vai aparecer na tela.
+if not check_password():
+    st.stop()
+
 
 # ==========================================
 # LISTA GLOBAL DE PERGUNTAS
