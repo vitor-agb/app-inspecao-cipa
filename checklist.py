@@ -8,6 +8,15 @@ from sqlalchemy import text # <--- Novo import para falar com o banco de dados d
 # Configuração inicial da página
 st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
+esconder_estilo = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+    """
+st.markdown(esconder_estilo, unsafe_allow_html=True)
+
 # ==========================================
 # LISTA GLOBAL DE PERGUNTAS
 # ==========================================
