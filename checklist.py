@@ -25,31 +25,25 @@ st.markdown(esconder_estilo, unsafe_allow_html=True)
 # SISTEMA DE LOGIN (TELA DE BLOQUEIO)
 # ==========================================
 def check_password():
-    """Retorna True se o usuário inseriu a senha correta."""
-    def password_entered():
-        if st.session_state["senha"] == st.secrets["senha_acesso"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["senha"]  # Apaga a senha da memória por segurança
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # Primeira execução, mostra a tela de login
-        st.title("🔒 Acesso Restrito - CIPA")
-        st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
-        st.button("Entrar", on_click=password_entered, type="primary") # Adicionamos o botão de destaque aqui
-        return False
-    elif not st.session_state["password_correct"]:
-        # Senha errada, mostra o aviso
-        st.title("🔒 Acesso Restrito - CIPA")
-        st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
-        st.button("Entrar", on_click=password_entered, type="primary") # E aqui também
-        st.error("😕 Senha incorreta. Tente novamente.")
-        return False
-    else:
-        # Senha correta, libera o sistema
+    # Se a senha já foi validada antes, libera o acesso direto
+    if st.session_state.get("password_correct", False):
         return True
 
+    # Se não, exibe a tela de login
+    st.title("🔒 Acesso Restrito - CIPA")
+    senha_digitada = st.text_input("Digite a senha de acesso para continuar:", type="password")
+    
+    # Valida se o usuário clicou no botão OU apertou Enter
+    if st.button("Entrar", type="primary") or senha_digitada:
+        if senha_digitada == st.secrets["senha_acesso"]:
+            st.session_state["password_correct"] = True
+            st.rerun() # Atualiza a página instantaneamente para liberar o painel
+        elif senha_digitada:
+            st.error("😕 Senha incorreta. Tente novamente.")
+            
+    return False
+
+# Se não estiver logado, bloqueia a leitura do resto do sistema
 if not check_password():
     st.stop()
 
