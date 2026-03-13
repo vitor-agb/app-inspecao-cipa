@@ -10,9 +10,14 @@ st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
 esconder_estilo = """
     <style>
+    /* Oculta APENAS o menu de três pontos (direito) */
     #MainMenu {visibility: hidden;}
+    
+    /* Oculta o botão de Deploy */
+    .stAppDeployButton {display: none;}
+    
+    /* Oculta o rodapé padrão inferior */
     footer {visibility: hidden;}
-    header {visibility: hidden;}
     </style>
     """
 st.markdown(esconder_estilo, unsafe_allow_html=True)
