@@ -37,19 +37,19 @@ def check_password():
         # Primeira execução, mostra a tela de login
         st.title("🔒 Acesso Restrito - CIPA")
         st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
+        st.button("Entrar", on_click=password_entered, type="primary") # Adicionamos o botão de destaque aqui
         return False
     elif not st.session_state["password_correct"]:
         # Senha errada, mostra o aviso
         st.title("🔒 Acesso Restrito - CIPA")
         st.text_input("Digite a senha de acesso para continuar:", type="password", on_change=password_entered, key="senha")
+        st.button("Entrar", on_click=password_entered, type="primary") # E aqui também
         st.error("😕 Senha incorreta. Tente novamente.")
         return False
     else:
         # Senha correta, libera o sistema
         return True
 
-# Se a senha não estiver correta, ele PARA de ler o código aqui.
-# Nada abaixo desta linha vai aparecer na tela.
 if not check_password():
     st.stop()
 
