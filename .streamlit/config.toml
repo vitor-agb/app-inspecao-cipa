@@ -1,0 +1,15 @@
+[theme]
+primaryColor = "#4CAF50"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#31333F"
+font = "sans serif"
+
+[ui]
+# Define o estado inicial da barra lateral. 
+# "collapsed" faz com que ela comece fechada (escondida).
+sidebarNavSections = "collapsed"
+initialSidebarState = "collapsed"
+
+[server]
+headless = true
