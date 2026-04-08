@@ -1,0 +1,7 @@
+streamlit
+pandas
+streamlit-option-menu
+altair
+SQLAlchemy
+psycopg2-binary
+supabase
