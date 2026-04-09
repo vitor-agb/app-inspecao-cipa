@@ -277,18 +277,24 @@ if pagina == "Nova Inspeção":
                 # Envio final ao Neon
                 salvar_dados(dados_para_salvar)
                 
-                # Feedback visual
-                if justificada:
-                    st.warning(f"Justificativa do setor {setor} salva com sucesso!")
-                else:
-                    st.success(f"Inspeção do setor {setor} registrada com sucesso!")
-                    st.balloons()
-
-                # Aguarda 3 segundos para o usuário ver o sucesso e os balões
+                # Criamos um container vazio para as mensagens
+                placeholder = st.empty()
+                
+                with placeholder.container():
+                    if justificada:
+                        st.warning(f"✅ Justificativa salva com sucesso!")
+                    else:
+                        st.success(f"🚀 Inspeção registrada com sucesso!")
+                        st.balloons()
+                
+                # Importante: o sleep deve ser pequeno no mobile para não cair a conexão
                 import time
-                time.sleep(3)
+                time.sleep(2)
 
-                # Força o recarregamento: limpa os campos e volta para o TOPO
+                # Limpamos o aviso antes de resetar
+                placeholder.empty()
+
+                # Forçamos o reset total da sessão
                 st.rerun()
 
 # ==========================================
