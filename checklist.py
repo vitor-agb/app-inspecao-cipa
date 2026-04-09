@@ -158,34 +158,32 @@ if pagina == "Nova Inspeção":
     col1, col2 = st.columns(2)
     with col1:
         col_mes, col_ano = st.columns(2)
-        with col1:
-            col_mes, col_ano = st.columns(2)
-            
-            # Lista fixa de meses
-            meses_lista = [
-                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
-                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
-            ]
+    with col1:
+        col_mes, col_ano = st.columns(2)
+        
+        meses_lista = [
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+        ]
 
-            # Define o mês atual como padrão (index 0 a 11)
-            indice_mes_atual = datetime.now().month - 1
+        # Identifica o mês atual (hoje é Abril, então será 3)
+        indice_mes_atual = datetime.now().month - 1
+        ano_atual_texto = str(datetime.now().year)
 
         with col_mes:
             mes_escolhido = st.selectbox(
                 "Mês de Referência", 
                 meses_lista, 
-                index=indice_mes_atual
+                index=indice_mes_atual,
+                key="nova_chave_mes_v1"  # Força o Streamlit a resetar o cache
             )
             
         with col_ano:
-            # Captura apenas o ano vigente
-            ano_atual = str(datetime.now().year)
-            
-            # Exibe apenas o ano atual em uma lista de um único item
             ano_escolhido = st.selectbox(
                 "Ano", 
-                [ano_atual], 
-                index=0
+                [ano_atual_texto], 
+                index=0,
+                key="nova_chave_ano_v1"  # Força o Streamlit a resetar o cache
             )
         
         mes_referencia = f"{mes_escolhido}/{ano_escolhido}"
