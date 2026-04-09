@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import datetime
+import time
 from streamlit_option_menu import option_menu
 import pandas as pd
 import altair as alt
@@ -289,7 +290,7 @@ if pagina == "Nova Inspeção":
                 
                 # Importante: o sleep deve ser pequeno no mobile para não cair a conexão
                 import time
-                time.sleep(2)
+                time.sleep(3)
 
                 # Limpamos o aviso antes de resetar
                 placeholder.empty()
