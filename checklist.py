@@ -185,6 +185,13 @@ if pagina == "Nova Inspeção":
         
         obs_geral = st.text_area("Observações Gerais")
         foto_geral = st.file_uploader("📸 Foto Geral", type=["jpg", "jpeg", "png"], key="u_g", accept_multiple_files=True)
+    lista_perguntas = st.secrets.get("lista_perguntas_cipa", [])
+
+    # LINHAS DE TESTE (TERMÔMETRO):
+    if not lista_perguntas:
+        st.error("🚨 ATENÇÃO: A lista de perguntas nos Secrets está VAZIA ou com ERRO de formato!")
+    else:
+        st.info(f"✅ Sucesso: {len(lista_perguntas)} perguntas carregadas dos Secrets.")
 
     if st.button("Salvar Inspeção", type="primary"):
         if justificada and not motivo_justificativa.strip():
