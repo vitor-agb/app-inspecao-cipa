@@ -158,25 +158,35 @@ if pagina == "Nova Inspeção":
     col1, col2 = st.columns(2)
     with col1:
         col_mes, col_ano = st.columns(2)
-        with col_mes:
-            # 1. Lista de meses
+        with col1:
+            col_mes, col_ano = st.columns(2)
+            
+            # Lista fixa de meses
             meses_lista = [
                 "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
                 "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
             ]
-            
-            # 2. Identifica o índice do mês atual
-            mes_atual_idx = datetime.now().month - 1
-            
-            # 3. Define o index no selectbox
+
+            # Define o mês atual como padrão (index 0 a 11)
+            indice_mes_atual = datetime.now().month - 1
+
+        with col_mes:
             mes_escolhido = st.selectbox(
                 "Mês de Referência", 
                 meses_lista, 
-                index=mes_atual_idx)
+                index=indice_mes_atual
+            )
+            
         with col_ano:
-            ano_atual = datetime.now().year
-            anos_disponiveis = [str(ano) for ano in range(ano_atual)]
-            ano_escolhido = st.selectbox("Ano", anos_disponiveis)
+            # Captura apenas o ano vigente
+            ano_atual = str(datetime.now().year)
+            
+            # Exibe apenas o ano atual em uma lista de um único item
+            ano_escolhido = st.selectbox(
+                "Ano", 
+                [ano_atual], 
+                index=0
+            )
         
         mes_referencia = f"{mes_escolhido}/{ano_escolhido}"
         setor = st.selectbox("Setor Inspecionado", lista_setores)
