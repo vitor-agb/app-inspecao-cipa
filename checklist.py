@@ -226,7 +226,7 @@ if pagina == "Nova Inspeção":
         if justificada and not motivo_justificativa.strip():
             st.error("É obrigatório preencher o motivo da não realização para salvar o registro.")
         else:
-            with st.spinner("Processando dados e enviando evidências fotográficas..."):
+            with st.spinner("Processando dados..."):
                 dados_para_salvar = {
                     "mes_referencia": mes_referencia,
                     "setor": setor,
@@ -279,24 +279,24 @@ if pagina == "Nova Inspeção":
                 salvar_dados(dados_para_salvar)
                 
                 # Criamos um container vazio para as mensagens
-                placeholder = st.empty()
-                
-                with placeholder.container():
-                    if justificada:
-                        st.warning(f"✅ Justificativa salva com sucesso!")
-                    else:
-                        st.success(f"🚀 Inspeção registrada com sucesso!")
-                        st.balloons()
-                
-                # Importante: o sleep deve ser pequeno no mobile para não cair a conexão
-                import time
-                time.sleep(3)
+        placeholder = st.empty()
+        
+        with placeholder.container():
+            if justificada:
+                st.warning(f"Justificativa salva com sucesso!")
+            else:
+                st.success(f"Inspeção registrada com sucesso!")
+                st.balloons()
+        
+        # Importante: o sleep deve ser pequeno no mobile para não cair a conexão
+        import time
+        time.sleep(3)
 
-                # Limpamos o aviso antes de resetar
-                placeholder.empty()
+        # Limpamos o aviso antes de resetar
+        placeholder.empty()
 
-                # Forçamos o reset total da sessão
-                st.rerun()
+        # Forçamos o reset total da sessão
+        st.rerun()
 
 # ==========================================
 # INTERFACE: DASHBOARD
