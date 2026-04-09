@@ -95,13 +95,28 @@ cliente_supabase: Client = create_client(url_storage, key_storage)
 # INTEGRACOES COM BANCO DE DADOS E STORAGE
 # ==========================================
 def salvar_dados(dados_dict):
-    conn = st.connection("supabase", type="sql")
+    # Força o fechamento de conexões antigas e "viciadas"
+    st.cache_data.clear() 
+    
+    # Prepara a query
     colunas = ', '.join(dados_dict.keys())
     marcadores = ', '.join([f":{k}" for k in dados_dict.keys()])
     query_sql = text(f"INSERT INTO inspecoes ({colunas}) VALUES ({marcadores})")
-    with conn.session as session:
-        session.execute(query_sql, dados_dict)
-        session.commit()
+    
+    try:
+        # Abrimos a sessão usando o 'with' para garantir que ela feche logo após o uso
+        with st.connection("postgresql", type="sql").session as session:
+            session.execute(query_sql, dados_dict)
+            session.commit()
+    except Exception as e:
+        # Se der erro de SSL/Conexão fechada, tentamos resetar o motor de conexão
+        st.error("Conexão instável detectada. Tentando reconectar...")
+        st.cache_resource.clear() # Limpa o motor do SQLAlchemy
+        
+        # Tenta uma segunda vez com conexão limpa
+        with st.connection("postgresql", type="sql").session as session:
+            session.execute(query_sql, dados_dict)
+            session.commit()
 
 def processar_upload_imagem(arquivo_bytes, nome_arquivo):
     """
