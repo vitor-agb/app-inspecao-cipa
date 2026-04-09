@@ -141,6 +141,11 @@ with st.sidebar:
 # INTERFACE: FORMULARIO DE INSERCAO DE DADOS
 # ==========================================
 if pagina == "Nova Inspeção":
+    lista_perguntas = st.secrets.get("lista_perguntas_cipa", [])
+
+    if not lista_perguntas:
+        st.error("ERRO: A lista de perguntas não foi carregada. Verifique os Secrets.")
+        st.stop()
     st.title("📝 Nova Inspeção CIPA")
     
     col1, col2 = st.columns(2)
@@ -185,11 +190,6 @@ if pagina == "Nova Inspeção":
         
         obs_geral = st.text_area("Observações Gerais")
         foto_geral = st.file_uploader("📸 Foto Geral", type=["jpg", "jpeg", "png"], key="u_g", accept_multiple_files=True)
-    lista_perguntas = st.secrets.get("lista_perguntas_cipa", [])
-
-    if not lista_perguntas:
-        st.error("ERRO: A lista de perguntas não foi carregada. Verifique o formato nos Secrets.")
-        st.stop() # Interrompe aqui para você saber que o erro é nos Secrets
 
     if st.button("Salvar Inspeção", type="primary"):
         if justificada and not motivo_justificativa.strip():
