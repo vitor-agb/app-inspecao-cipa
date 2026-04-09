@@ -277,11 +277,19 @@ if pagina == "Nova Inspeção":
                 # Envio final ao Neon
                 salvar_dados(dados_para_salvar)
                 
+                # Feedback visual
                 if justificada:
-                    st.warning(f"Justificativa salva com sucesso!")
+                    st.warning(f"Justificativa do setor {setor} salva com sucesso!")
                 else:
-                    st.success(f"Inspeção registrada com sucesso!")
+                    st.success(f"Inspeção do setor {setor} registrada com sucesso!")
                     st.balloons()
+
+                # Aguarda 3 segundos para o usuário ver o sucesso e os balões
+                import time
+                time.sleep(3)
+
+                # Força o recarregamento: limpa os campos e volta para o TOPO
+                st.rerun()
 
 # ==========================================
 # INTERFACE: DASHBOARD
