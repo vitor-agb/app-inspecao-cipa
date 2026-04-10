@@ -127,6 +127,31 @@ def salvar_dados(dados_dict):
                 st.error(f"Erro crítico ao salvar no banco: {e}")
                 raise e
 
+def carregar_dados():
+    """
+    Busca os dados no banco com resiliência contra hibernação (Scale-to-Zero) do Neon.
+    """
+    query_sql = "SELECT * FROM inspecoes ORDER BY data_execucao DESC"
+    max_tentativas = 2
+    
+    for tentativa in range(max_tentativas):
+        try:
+            conn_db = st.connection("postgresql", type="sql")
+            # Faz a busca forçando dados frescos (ttl=0)
+            df = conn_db.query(query_sql, ttl=0)
+            return df
+        except Exception as e:
+            erro_str = str(e).lower()
+            if ("ssl" in erro_str or "closed" in erro_str or "operationalerror" in erro_str) and tentativa < max_tentativas - 1:
+                # Se o banco estiver dormindo, limpa a memória, espera 1.5s e tenta de novo
+                st.cache_resource.clear()
+                time.sleep(1.5)
+                continue
+            else:
+                # Se for um erro real ou falhar na 2ª vez, retorna um dataframe vazio para não "quebrar" a tela
+                st.error(f"⚠️ Servidor do banco de dados indisponível no momento. Tente novamente.")
+                return pd.DataFrame()
+
 def processar_upload_imagem(arquivo_bytes, nome_arquivo):
     """
     Realiza o upload e trata erros de limite de armazenamento.
@@ -329,9 +354,7 @@ elif pagina == "Dashboard de Indicadores":
     st.title("📊 Dashboard e Indicadores")
     
     try:
-        conn = st.connection("supabase", type="sql")
-        # Busca ordenada para garantir que os dados mais recentes sejam processados primeiro
-        df = conn.query("SELECT * FROM inspecoes ORDER BY data_execucao DESC", ttl=0)
+        df = carregar_dados()
 
         if df.empty:
             st.info("Ainda não existem dados suficientes para gerar os gráficos. Realize uma inspeção primeiro.")
@@ -440,8 +463,7 @@ elif pagina == "Dashboard de Indicadores":
 elif pagina == "Galeria de Evidências":
     st.title("📸 Galeria de Evidências")
     try:
-        conn = st.connection("supabase", type="sql")
-        df = conn.query("SELECT * FROM inspecoes ORDER BY data_execucao DESC", ttl=0)
+        df = carregar_dados()
         if df.empty:
             st.info("Ainda não foi registrada nenhuma inspeção.")
         else:
@@ -505,8 +527,7 @@ elif pagina == "Galeria de Evidências":
 elif pagina == "Histórico de Dados":
     st.title("📂 Histórico e Gestão")
     try:
-        conn = st.connection("supabase", type="sql")
-        df = conn.query("SELECT * FROM inspecoes ORDER BY data_execucao DESC", ttl=0)
+        df = carregar_dados()
         if not df.empty:
             df_exibicao = df.copy()
             df_exibicao['data_execucao'] = pd.to_datetime(df_exibicao['data_execucao']).dt.strftime('%d/%m/%Y %H:%M')
