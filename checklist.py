@@ -95,13 +95,37 @@ cliente_supabase: Client = create_client(url_storage, key_storage)
 # INTEGRACOES COM BANCO DE DADOS E STORAGE
 # ==========================================
 def salvar_dados(dados_dict):
-    conn = st.connection("supabase", type="sql")
     colunas = ', '.join(dados_dict.keys())
     marcadores = ', '.join([f":{k}" for k in dados_dict.keys()])
     query_sql = text(f"INSERT INTO inspecoes ({colunas}) VALUES ({marcadores})")
-    with conn.session as session:
-        session.execute(query_sql, dados_dict)
-        session.commit()
+    
+    max_tentativas = 2
+    
+    for tentativa in range(max_tentativas):
+        try:
+            # Puxa a conexão (pode estar em cache ou ser uma nova)
+            conn_db = st.connection("postgresql", type="sql")
+            with conn_db.session as session:
+                session.execute(query_sql, dados_dict)
+                session.commit()
+            
+            # Se chegou aqui, salvou com sucesso. Quebra o loop e segue a vida.
+            break 
+            
+        except Exception as e:
+            erro_str = str(e).lower()
+            # Verifica se o erro foi de conexão caída/banco dormindo
+            if ("ssl" in erro_str or "closed" in erro_str or "operationalerror" in erro_str) and tentativa < max_tentativas - 1:
+                # O banco estava dormindo. Limpamos a conexão velha da memória...
+                st.cache_resource.clear()
+                # ... damos 1 segundo para o Neon inicializar o servidor ...
+                time.sleep(1)
+                # ... e o loop (continue) fará a segunda tentativa automaticamente.
+                continue 
+            else:
+                # Se for um erro real (ex: coluna não existe) ou se falhou nas 2 tentativas
+                st.error(f"Erro crítico ao salvar no banco: {e}")
+                raise e
 
 def processar_upload_imagem(arquivo_bytes, nome_arquivo):
     """
