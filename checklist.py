@@ -129,27 +129,28 @@ def salvar_dados(dados_dict):
 
 def carregar_dados():
     """
-    Busca os dados no banco com resiliência contra hibernação (Scale-to-Zero) do Neon.
+    Busca os dados no banco com tolerância estendida para o 'Cold Start' do Neon.
     """
     query_sql = "SELECT * FROM inspecoes ORDER BY data_execucao DESC"
-    max_tentativas = 2
+    max_tentativas = 3 # Aumentamos para 3 tentativas para cobrir o tempo do Neon
     
     for tentativa in range(max_tentativas):
         try:
             conn_db = st.connection("postgresql", type="sql")
-            # Faz a busca forçando dados frescos (ttl=0)
             df = conn_db.query(query_sql, ttl=0)
             return df
         except Exception as e:
-            erro_str = str(e).lower()
-            if ("ssl" in erro_str or "closed" in erro_str or "operationalerror" in erro_str) and tentativa < max_tentativas - 1:
-                # Se o banco estiver dormindo, limpa a memória, espera 1.5s e tenta de novo
-                st.cache_resource.clear()
-                time.sleep(1.5)
+            # Se falhou, limpamos o motor viciado da memória
+            st.cache_resource.clear()
+            
+            if tentativa < max_tentativas - 1:
+                # O Neon pode levar 4~5 segundos para acordar. Esperamos 3s a cada falha.
+                import time
+                time.sleep(3)
                 continue
             else:
-                # Se for um erro real ou falhar na 2ª vez, retorna um dataframe vazio para não "quebrar" a tela
-                st.error(f"⚠️ Servidor do banco de dados indisponível no momento. Tente novamente.")
+                # 🚨 SE FALHAR AS 3 VEZES, MOSTRA O ERRO REAL NA TELA
+                st.error(f"⚠️ Detalhe Técnico do Erro: {e}")
                 return pd.DataFrame()
 
 def processar_upload_imagem(arquivo_bytes, nome_arquivo):
