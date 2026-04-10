@@ -370,7 +370,21 @@ elif pagina == "Dashboard de Indicadores":
                 ano_sel = st.selectbox("📅 Filtrar por Ano:", ["Todos"] + anos_disp)
             with col_f2:
                 df_meses = df[df['ano'] == ano_sel] if ano_sel != "Todos" else df
-                meses_disp = df_meses['mes_referencia'].unique().tolist()
+                meses_brutos = df_meses['mes_referencia'].unique().tolist()
+                
+                # Lista de referência para forçar a ordem cronológica
+                ordem_meses = [
+                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
+                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+                ]
+                
+                # Ordena a lista de meses brutos baseando-se na ordem do calendário
+                # O split('/')[0] isola a palavra "Abril" de "Abril/2026" para achar a posição certa
+                meses_disp = sorted(
+                    meses_brutos, 
+                    key=lambda x: ordem_meses.index(x.split('/')[0]) if x.split('/')[0] in ordem_meses else 99
+                )
+                
                 mes_sel = st.selectbox("📆 Filtrar por Mês:", ["Todos"] + meses_disp)
             
             # Aplicação dos Filtros
