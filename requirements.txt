@@ -5,3 +5,4 @@ altair
 SQLAlchemy
 psycopg2-binary
 supabase
+cloudinary
