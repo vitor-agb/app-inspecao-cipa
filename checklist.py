@@ -331,11 +331,17 @@ elif pagina == "Dashboard de Indicadores":
             
             # MATRIZ DE PARTICIPAÇÃO
             st.divider()
-            st.subheader(f"Matriz de Engajamento Anual ({ano_sel})")
             
-            df_matriz = df[df['ano'] == ano_sel].copy() if ano_sel != "Todos" else df.copy()
+            ano_atual_sistema = str(datetime.now().year)
+            ano_matriz = ano_atual_sistema if ano_sel == "Todos" else ano_sel
+            
+            st.subheader(f"Matriz de Engajamento Anual ({ano_matriz})")
+            
+            df_matriz = df[df['ano'] == ano_matriz].copy()
 
-            if not df_matriz.empty:
+            if df_matriz.empty:
+                st.info(f"Nenhuma inspeção registrada no sistema para o ano de {ano_matriz}.")
+            else:
                 df_matriz['mes_nome'] = df_matriz['mes_referencia'].apply(lambda x: str(x).split('/')[0])
                 
                 tabela_dinamica = df_matriz.groupby(['cipeiro', 'mes_nome'])['status'].apply(
@@ -348,10 +354,13 @@ elif pagina == "Dashboard de Indicadores":
                         
                 tabela_dinamica = tabela_dinamica[ordem_meses]
                 
-                cipeiros_faltantes = [c for c in lista_completa_cipeiros if c not in tabela_dinamica.index]
-                for c in cipeiros_faltantes:
-                    tabela_dinamica.loc[c] = ['❌'] * 12
+                if ano_matriz == ano_atual_sistema:
+                    cipeiros_no_banco = tabela_dinamica.index.tolist()
+                    cipeiros_faltantes = [c for c in lista_completa_cipeiros if c not in cipeiros_no_banco]
                     
+                    for c in cipeiros_faltantes:
+                        tabela_dinamica.loc[c] = ['❌'] * 12
+                        
                 tabela_dinamica = tabela_dinamica.sort_index().reset_index()
                 tabela_dinamica.rename(columns={'cipeiro': 'Nome do Cipeiro'}, inplace=True)
                 
