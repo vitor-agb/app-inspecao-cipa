@@ -111,12 +111,10 @@ def carregar_dados():
 
 def processar_upload_imagem(arquivo_bytes, nome_arquivo):
     try:
-        # Upload direto em memória para a CDN do Cloudinary
         resposta = cloudinary.uploader.upload(arquivo_bytes)
-        return resposta.get("secure_url")
+        return resposta.get("secure_url"), None
     except Exception as e:
-        st.error(f"Falha no upload da imagem: {e}")
-        return None
+        return None, str(e)
 
 # ==========================================
 # NAVEGAÇÃO
@@ -132,19 +130,30 @@ with st.sidebar:
 # ==========================================
 if pagina == "Nova Inspeção":
     
-    # 1. VERIFICA SE ESTAMOS NA "TELA DE SUCESSO"
+    # 1. TELA DE SUCESSO / FEEDBACK
     if st.session_state.get("tela_sucesso", False):
         st.title("✅ Inspeção Concluída!")
-        st.success("O formulário foi salvo no banco de dados e as evidências foram enviadas com segurança.")
-        st.balloons()
+        st.success("O formulário principal foi salvo com sucesso no banco de dados.")
         
+        # Puxa os erros que guardamos na memória
+        alertas = st.session_state.get("alertas_upload", [])
+        
+        if alertas:
+            st.warning("⚠️ O formulário foi salvo, mas algumas imagens falharam e não foram anexadas:")
+            for alerta in alertas:
+                st.error(alerta)
+            st.info("ℹ️ Você pode ignorar este aviso se as imagens não forem críticas, ou tentar fazer a inspeção novamente mais tarde.")
+        else:
+            # Só solta balões se TUDO deu 100% certo (dados + imagens)
+            st.balloons()
+            
         st.divider()
-        # Botão para limpar a memória e voltar ao formulário limpo
         if st.button("⬅️ Fazer Nova Inspeção", type="primary"):
             st.session_state["tela_sucesso"] = False
+            st.session_state["alertas_upload"] = [] # Limpa os alertas
             st.rerun()
             
-    # 2. SE NÃO FOR SUCESSO, MOSTRA O FORMULÁRIO NORMALMENTE
+    # 2. FORMULÁRIO NORMAL
     else:
         if not lista_perguntas:
             st.error("Erro de configuração: 'lista_perguntas_cipa' não localizada.")
@@ -152,15 +161,13 @@ if pagina == "Nova Inspeção":
 
         st.title("📝 Nova Inspeção CIPA")
         
+        # ... (SEU CÓDIGO DE COLUNAS E PERGUNTAS CONTINUA IGUAL AQUI) ...
         col1, col2 = st.columns(2)
         with col1:
             c_mes, c_ano = st.columns(2)
             meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-            
-            with c_mes:
-                mes_sel = st.selectbox("Mês de Referência", meses, index=datetime.now().month-1, key="m_v1")
-            with c_ano:
-                ano_sel = st.selectbox("Ano", [str(datetime.now().year)], index=0, key="a_v1")
+            with c_mes: mes_sel = st.selectbox("Mês de Referência", meses, index=datetime.now().month-1, key="m_v1")
+            with c_ano: ano_sel = st.selectbox("Ano", [str(datetime.now().year)], index=0, key="a_v1")
             
             mes_referencia = f"{mes_sel}/{ano_sel}"
             setor = st.selectbox("Setor Inspecionado", lista_setores)
@@ -195,13 +202,14 @@ if pagina == "Nova Inspeção":
             if justificada and not motivo_justificativa.strip():
                 st.error("Preenchimento obrigatório: Motivo da não realização.")
             else:
-                # Mudamos a mensagem do spinner para deixar claro que pode demorar
                 with st.spinner("Processando dados e enviando imagens. Por favor, aguarde..."):
                     dados = {
                         "mes_referencia": mes_referencia, "setor": setor, "responsavel_area": responsavel_area,
                         "data_execucao": datetime.now(), "cipeiro": cipeiro, "acompanhantes": acompanhantes,
                         "status": "Justificada" if justificada else "Realizada"
                     }
+                    
+                    lista_de_erros = [] # Vai guardar os erros de imagem
 
                     for i in range(1, len(lista_perguntas) + 1):
                         chave_foto = f"foto_q{i}"
@@ -212,20 +220,34 @@ if pagina == "Nova Inspeção":
                             dados[f"obs{i}"] = observacoes.get(f"obs{i}", "")
                             arqs = fotos_capturadas.get(chave_foto)
                             
-                            urls = [processar_upload_imagem(a.getvalue(), a.name) for a in arqs] if arqs else []
+                            urls = []
+                            if arqs:
+                                for a in arqs:
+                                    url, erro = processar_upload_imagem(a.getvalue(), a.name)
+                                    if url:
+                                        urls.append(url)
+                                    if erro:
+                                        lista_de_erros.append(f"Erro na Questão {i} ({a.name}): {erro}")
+                                        
                             dados[chave_foto] = ", ".join([u for u in urls if u])
 
                     dados["obs_geral"] = motivo_justificativa if justificada else obs_geral
                     if not justificada and foto_geral:
-                        urls_g = [processar_upload_imagem(a.getvalue(), a.name) for a in foto_geral]
+                        urls_g = []
+                        for a in foto_geral:
+                            url_g, erro_g = processar_upload_imagem(a.getvalue(), a.name)
+                            if url_g:
+                                urls_g.append(url_g)
+                            if erro_g:
+                                lista_de_erros.append(f"Erro na Foto Geral ({a.name}): {erro_g}")
                         dados["foto_geral"] = ", ".join([u for u in urls_g if u])
                     else:
                         dados["foto_geral"] = ""
 
-                    # Tenta salvar no banco. Se der erro, ele vai quebrar aqui e mostrar o erro (sem ir para a tela de sucesso)
                     salvar_dados(dados)
 
-                # Se passou pelo salvar_dados sem erros, ativamos a tela de sucesso e recarregamos
+                # Salva os erros na memória para a tela seguinte
+                st.session_state["alertas_upload"] = lista_de_erros
                 st.session_state["tela_sucesso"] = True
                 st.rerun()
 
