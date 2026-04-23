@@ -326,6 +326,39 @@ elif pagina == "Dashboard de Indicadores":
                     )
                     textos = barras.mark_text(align='left', dx=5, fontWeight='bold', color='gray').encode(text='rotulo:N')
                     st.altair_chart(barras + textos, use_container_width=True)
+                    
+                    # NOVA SEÇÃO: MATRIZ DE PARTICIPAÇÃO
+                    st.divider()
+                    st.subheader("Matriz de Engajamento Anual")
+                    
+                    df_matriz = df[df['ano'] == ano_sel] if ano_sel != "Todos" else df.copy()
+
+                    if not df_matriz.empty:
+                        df_matriz['mes_nome'] = df_matriz['mes_referencia'].apply(lambda x: str(x).split('/')[0])
+                        
+                        tabela_dinamica = df_matriz.groupby(['cipeiro', 'mes_nome'])['status'].apply(
+                            lambda x: '✅' if 'Realizada' in x.values else '🚷'
+                        ).unstack(fill_value='❌')
+                        
+                        for mes in ordem_meses:
+                            if mes not in tabela_dinamica.columns:
+                                tabela_dinamica[mes] = '❌'
+                                
+                        tabela_dinamica = tabela_dinamica[ordem_meses]
+                        
+                        cipeiros_faltantes = [c for c in lista_completa_cipeiros if c not in tabela_dinamica.index]
+                        for c in cipeiros_faltantes:
+                            tabela_dinamica.loc[c] = ['❌'] * 12
+                            
+                        tabela_dinamica = tabela_dinamica.sort_index().reset_index()
+                        tabela_dinamica.rename(columns={'cipeiro': 'Nome do Cipeiro'}, inplace=True)
+                        
+                        st.dataframe(
+                            tabela_dinamica, 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                        st.caption("**Legenda:** ✅ Inspeção Realizada | 🚷 Ausência Justificada | ❌ Pendente / Não Realizada")
             else:
                 st.info("Registros insuficientes para aplicação dos filtros selecionados.")
     except Exception as e:
