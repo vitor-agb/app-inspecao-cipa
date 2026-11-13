@@ -2,16 +2,16 @@
 font = "sans serif"
 
 [theme.light]
-primaryColor = "#1B5E20"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#161616"
+primaryColor = "#2b7a2e"
+backgroundColor = "#f3f5f2"
+secondaryBackgroundColor = "#ecf0eb"
+textColor = "#161d25"
 
 [theme.dark]
-primaryColor = "#A4E745"
-backgroundColor = "#161616"
-secondaryBackgroundColor = "#1F1F1F"
-textColor = "#F2F2F2"
+primaryColor = "#a4e745"
+backgroundColor = "#0e1318"
+secondaryBackgroundColor = "#1f2833"
+textColor = "#eef2ef"
 
 [ui]
 # Define o estado inicial da barra lateral. 

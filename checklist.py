@@ -59,9 +59,9 @@ st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 st.markdown("""
     <style>
     @import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Ubuntu:wght@400;500;700&display=swap");
-    :root {--c-brand:#1B5E20; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161616; --c-mut:#5c5c5c; --c-bd:#ccc; --c-sel:#E3EFE4; --c-realce:#FFB200;}
+    :root {--c-brand:#2b7a2e; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161d25; --c-mut:#56616b; --c-bd:#dce2dd; --c-sel:#e1f2e7; --c-realce:#ffb200; --c-side:#161d25;}
     @media (prefers-color-scheme: dark) {
-        :root {--c-brand:#A4E745; --c-brand-tx:#161616; --c-card:#1f1f1f; --c-tx:#f2f2f2; --c-mut:#a8a8a8; --c-bd:#3a3a3a; --c-sel:#243a27;}
+        :root {--c-brand:#a4e745; --c-brand-tx:#161d25; --c-card:#161d25; --c-tx:#eef2ef; --c-mut:#9aa6b0; --c-bd:#2a3540; --c-sel:#25341f; --c-side:#0a0e12;}
     }
     html, body, .stApp, [data-testid="stAppViewContainer"] {font-family: Lato, system-ui, "Segoe UI", Arial, sans-serif;}
     h1, h2, h3, h4, [data-testid="stMetricValue"] {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif !important;}
@@ -82,14 +82,14 @@ st.markdown("""
     .destaque-setor .rotulo {color: var(--c-mut); font-size: 12px; text-transform: uppercase; letter-spacing: .04em;}
     .destaque-setor .nome {color: var(--c-tx); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 18px; font-weight: 700;}
     .destaque-setor .valor {color: var(--c-brand); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 22px; font-weight: 700;}
-    [data-testid="stSidebar"] {background: #161d25 !important; border-right: 0;}
-    [data-testid="stSidebar"], [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {color: #f2f2f2;}
+    [data-testid="stSidebar"] {background: var(--c-side) !important; border-right: 0;}
+    [data-testid="stSidebar"], [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {color: #e9eeea;}
     [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {color: #93a0ab !important;}
-    [data-testid="stSidebar"] button {background: transparent; border: 1px solid #3a4553; color: #f2f2f2;}
-    [data-testid="stSidebar"] button:hover {border-color: #A4E745; color: #A4E745;}
-    [data-testid="stSidebar"] button svg {color: #f2f2f2;}
-    .marca-lateral {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: .12em; color: #f2f2f2; line-height: 1.1;}
-    .submarca-lateral {color: #A4E745; font-size: 12px; margin: 2px 0 14px 0;}
+    [data-testid="stSidebar"] button {background: transparent; border: 1px solid #2a3540; color: #e9eeea;}
+    [data-testid="stSidebar"] button:hover {border-color: #a4e745; color: #a4e745;}
+    [data-testid="stSidebar"] button svg {color: #e9eeea;}
+    .marca-lateral {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: .12em; color: #e9eeea; line-height: 1.1;}
+    .submarca-lateral {color: #a4e745; font-size: 12px; margin: 2px 0 14px 0;}
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
     div[data-testid="stFileUploader"] section > div[data-testid="stMarkdownContainer"] {display: none !important;}
@@ -778,6 +778,15 @@ def validar_fotos(fotos_capturadas, foto_geral):
 perfil_atual = st.session_state.get("perfil", "cipeiro")
 paginas_permitidas = [p for p in ORDEM_PAGINAS if p in PAGINAS_POR_PERFIL.get(perfil_atual, PAGINAS_POR_PERFIL["cipeiro"])]
 
+def tema_escuro():
+    # Tema ativo no navegador; sem suporte na versão instalada, assume o tema claro.
+    try:
+        return st.context.theme.type == "dark"
+    except Exception:
+        return False
+
+COR_LATERAL = "#0a0e12" if tema_escuro() else "#161d25"
+
 with st.sidebar:
     st.markdown('<div class="marca-lateral">GÊNICA</div><div class="submarca-lateral">CIPA · Inspeções de Segurança</div>', unsafe_allow_html=True)
     pagina = option_menu(None,
@@ -785,10 +794,11 @@ with st.sidebar:
         icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
         default_index=0,
         styles={
-            "container": {"padding": "0", "background-color": "transparent"},
-            "icon": {"color": "#f2f2f2", "font-size": "16px"},
-            "nav-link": {"color": "#f2f2f2", "font-size": "15px", "border-radius": "10px", "margin": "2px 0", "--hover-color": "#262f3a"},
-            "nav-link-selected": {"background-color": "#A4E745", "color": "#161616", "font-weight": "600"},
+            "container": {"padding": "0", "background-color": COR_LATERAL},
+            "nav": {"background-color": COR_LATERAL},
+            "icon": {"color": "#e9eeea", "font-size": "16px"},
+            "nav-link": {"color": "#e9eeea", "font-size": "15px", "border-radius": "10px", "margin": "2px 0", "--hover-color": "#232d38"},
+            "nav-link-selected": {"background-color": "#a4e745", "color": "#161d25", "font-weight": "600"},
         })
     st.caption(f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado')} ({perfil_atual})")
     if st.button("Sair"):
@@ -1006,7 +1016,7 @@ elif pagina == "Dashboard de Indicadores":
                     df_medias_setor['setor_curto'] = df_medias_setor['setor'].str.replace("Prédio Nº ", "P").str.replace("Produção de ", "Prod. ")
                     df_medias_setor['rotulo'] = df_medias_setor['nota_porcentagem'].apply(lambda x: f"{x:.1f}%")
 
-                    barras = alt.Chart(df_medias_setor).mark_bar(color="#2E7D32").encode(
+                    barras = alt.Chart(df_medias_setor).mark_bar(color="#4fb253" if tema_escuro() else "#359138").encode(
                         y=alt.Y('setor_curto', title=None, sort='-x'),
                         x=alt.X('nota_porcentagem', title='Conformidade (%)', scale=alt.Scale(domain=[0, 115]))
                     )
