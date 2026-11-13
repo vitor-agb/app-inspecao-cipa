@@ -54,13 +54,36 @@ PAGINAS_POR_PERFIL = {
 # ==========================================
 st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
+# Identidade visual compartilhada com o Estoque 2.0: verde institucional, destaque âmbar, Ubuntu nos títulos e Lato no texto.
+# Tema claro fixo, conforme .streamlit/config.toml.
 st.markdown("""
-    <style>  
+    <style>
+    @import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Ubuntu:wght@400;500;700&display=swap");
+    :root {--c-brand:#1B5E20; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161616; --c-mut:#5c5c5c; --c-bd:#ccc; --c-sel:#E3EFE4; --c-realce:#FFB200;}
+    html, body, .stApp, [data-testid="stAppViewContainer"] {font-family: Lato, system-ui, "Segoe UI", Arial, sans-serif;}
+    h1, h2, h3, h4, [data-testid="stMetricValue"] {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif !important;}
+    h1, h2, h3 {color: var(--c-brand) !important;}
+    [data-testid="stHeader"] {border-top: 4px solid var(--c-brand);}
+    [data-testid="stSidebar"] {border-right: 1px solid var(--c-bd);}
+    .stButton > button, [data-testid^="stBaseButton"] {border-radius: 6px;}
+    button[kind="primary"], [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {
+        background: var(--c-brand) !important; border-color: var(--c-brand) !important; color: var(--c-brand-tx) !important;
+    }
+    button[kind="primary"]:hover, [data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-primaryFormSubmit"]:hover {
+        filter: brightness(1.1); box-shadow: inset 0 -3px 0 var(--c-realce);
+    }
+    [data-testid="stMetric"] {background: var(--c-card); border: 1px solid var(--c-bd); border-radius: 8px; padding: 10px 14px;}
+    [data-testid="stMetricValue"] {color: var(--c-brand); font-weight: 700;}
+    [data-testid="stMetricLabel"] {color: var(--c-mut);}
+    .destaque-setor {background: var(--c-card); border: 1px solid var(--c-bd); border-left: 4px solid var(--c-realce); border-radius: 8px; padding: 12px 14px;}
+    .destaque-setor .rotulo {color: var(--c-mut); font-size: 12px; text-transform: uppercase; letter-spacing: .04em;}
+    .destaque-setor .nome {color: var(--c-tx); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 18px; font-weight: 700;}
+    .destaque-setor .valor {color: var(--c-brand); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 22px; font-weight: 700;}
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
     div[data-testid="stFileUploader"] section > div[data-testid="stMarkdownContainer"] {display: none !important;}
     div[data-testid="stFileUploaderFileData"] {display: block !important; margin-top: 10px;}
-    div[data-testid="stFileUploader"] label {font-weight: bold !important; color: #383838 !important;}
+    div[data-testid="stFileUploader"] label {font-weight: bold !important; color: var(--c-tx) !important;}
     </style>
     """, unsafe_allow_html=True)
 
@@ -748,7 +771,8 @@ with st.sidebar:
     pagina = option_menu("Menu CIPA",
         paginas_permitidas,
         icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
-        menu_icon="shield-check", default_index=0)
+        menu_icon="shield-check", default_index=0,
+        styles={"nav-link-selected": {"background-color": "#1B5E20", "color": "#ffffff"}, "icon": {"font-size": "16px"}})
     st.caption(f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado')} ({perfil_atual})")
     if st.button("Sair"):
         encerrar_sessao()
@@ -954,10 +978,10 @@ elif pagina == "Dashboard de Indicadores":
                     with c3: st.metric("Média de Conformidade", f"{media_geral:.1f}%")
                     
                     st.markdown(f"""
-                        <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #4CAF50;">
-                            <span style="font-size: 14px; color: #5f6368;">🏆 SETOR DESTAQUE</span><br>
-                            <span style="font-size: 18px; font-weight: bold; color: #1a1c1f;">{setor_campeao['setor']}</span><br>
-                            <span style="font-size: 16px; color: #4CAF50;">{setor_campeao['nota_porcentagem']:.1f}% de conformidade</span>
+                        <div class="destaque-setor">
+                            <div class="rotulo">🏆 Setor destaque</div>
+                            <div class="nome">{setor_campeao['setor']}</div>
+                            <div class="valor">{setor_campeao['nota_porcentagem']:.1f}% de conformidade</div>
                         </div>
                         """, unsafe_allow_html=True)
                     
@@ -965,7 +989,7 @@ elif pagina == "Dashboard de Indicadores":
                     df_medias_setor['setor_curto'] = df_medias_setor['setor'].str.replace("Prédio Nº ", "P").str.replace("Produção de ", "Prod. ")
                     df_medias_setor['rotulo'] = df_medias_setor['nota_porcentagem'].apply(lambda x: f"{x:.1f}%")
 
-                    barras = alt.Chart(df_medias_setor).mark_bar(color="#4CAF50").encode(
+                    barras = alt.Chart(df_medias_setor).mark_bar(color="#2E7D32").encode(
                         y=alt.Y('setor_curto', title=None, sort='-x'),
                         x=alt.X('nota_porcentagem', title='Conformidade (%)', scale=alt.Scale(domain=[0, 115]))
                     )
