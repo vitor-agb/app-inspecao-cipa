@@ -133,17 +133,53 @@ def listar_usuarios():
     )
     return [_normalizar_usuario(linha) for linha in linhas]
 
+def ano_atual():
+    return datetime.now().year
+
 @st.cache_data(ttl=60)
-def nomes_inspetores_ativos():
-    # Nomes dos usuários ativos que participam das inspeções (lista do formulário e da matriz de engajamento).
+def nomes_cipeiros_do_ano(ano, somente_ativos):
+    # Nomes dos usuários com mandato no ano (lista do formulário e da matriz de engajamento).
+    sql = ("SELECT u.nome FROM mandatos_cipa m JOIN usuarios_cipa u ON u.login = m.login WHERE m.ano = :ano"
+           + (" AND u.ativo = :ativo" if somente_ativos else "") + " ORDER BY u.nome")
+    parametros = {"ano": int(ano)}
+    if somente_ativos:
+        parametros["ativo"] = True
     try:
-        linhas = executar_sql(
-            "SELECT nome FROM usuarios_cipa WHERE ativo = :ativo AND inspetor = :inspetor ORDER BY nome",
-            {"ativo": True, "inspetor": True},
-        )
+        linhas = executar_sql(sql, parametros)
     except Exception:
         return []
     return [linha["nome"] for linha in linhas]
+
+def listar_mandatos():
+    # Retorna {login: [anos]} em ordem crescente.
+    linhas = executar_sql("SELECT login, ano FROM mandatos_cipa ORDER BY ano")
+    mandatos = {}
+    for linha in linhas:
+        mandatos.setdefault(linha["login"], []).append(int(linha["ano"]))
+    return mandatos
+
+def definir_mandato(login, ano, presente):
+    parametros = {"login": login, "ano": int(ano)}
+    existe = executar_sql("SELECT 1 AS existe FROM mandatos_cipa WHERE login = :login AND ano = :ano", parametros)
+    if presente and not existe:
+        executar_sql("INSERT INTO mandatos_cipa (login, ano) VALUES (:login, :ano)", parametros, leitura=False)
+    elif not presente and existe:
+        executar_sql("DELETE FROM mandatos_cipa WHERE login = :login AND ano = :ano", parametros, leitura=False)
+    nomes_cipeiros_do_ano.clear()
+
+def renovar_gestao(ano, continuam):
+    # Cria o mandato do ano para quem continua e desativa os demais usuários ativos com perfil cipeiro.
+    # O histórico de mandatos é preservado; gestor e admin não são afetados.
+    desativados = []
+    for usuario in listar_usuarios():
+        if usuario["perfil"] != "cipeiro" or not usuario["ativo"]:
+            continue
+        if usuario["login"] in continuam:
+            definir_mandato(usuario["login"], ano, True)
+        else:
+            atualizar_usuario(usuario["login"], "ativo", False)
+            desativados.append(usuario["login"])
+    return desativados
 
 def criar_usuario(login, nome, perfil, inspetor):
     senha = gerar_senha_provisoria()
@@ -154,7 +190,7 @@ def criar_usuario(login, nome, perfil, inspetor):
          "trocar": True, "ativo": True, "inspetor": bool(inspetor), "agora": datetime.now()},
         leitura=False,
     )
-    nomes_inspetores_ativos.clear()
+    nomes_cipeiros_do_ano.clear()
     return senha
 
 def redefinir_senha(login):
@@ -183,7 +219,7 @@ def atualizar_usuario(login, campo, valor):
         {"valor": valor, "agora": datetime.now(), "login": login},
         leitura=False,
     )
-    nomes_inspetores_ativos.clear()
+    nomes_cipeiros_do_ano.clear()
 
 def desbloquear_usuario(login):
     executar_sql(
@@ -209,6 +245,8 @@ def migrar_usuarios_secrets():
         if perfil not in PAGINAS_POR_PERFIL:
             perfil = "cipeiro"
         senha = criar_usuario(login, nome, perfil, nome in lista_inspetores)
+        if nome in lista_inspetores:
+            definir_mandato(login, ano_atual(), True)
         geradas.append((login, nome, perfil, senha))
     return geradas
 
@@ -372,16 +410,33 @@ def pagina_gerenciar_usuarios():
     except Exception as e:
         st.error(f"Tabela de usuários indisponível: {e}")
         return
+    try:
+        mandatos = listar_mandatos()
+    except Exception as e:
+        mandatos = {}
+        st.warning(f"Tabela de mandatos indisponível: {e}")
 
+    aviso = st.session_state.pop("aviso_admin", None)
+    if aviso:
+        st.success(aviso)
     geradas = st.session_state.pop("senhas_geradas", None)
     if geradas:
         st.success("Senhas provisórias geradas. Anote agora: não serão exibidas novamente.")
         st.table(pd.DataFrame(geradas, columns=["Usuário", "Nome", "Perfil", "Senha provisória"]))
 
+    anos_existentes = sorted({ano for anos in mandatos.values() for ano in anos}, reverse=True)
+    if anos_existentes and ano_atual() not in anos_existentes:
+        st.warning(f"Nenhum mandato cadastrado para {ano_atual()}. Use Renovar gestão.")
+
     if usuarios:
-        df_usuarios = pd.DataFrame(usuarios)[["login", "nome", "perfil", "ativo", "inspetor", "trocar_senha", "bloqueado"]]
-        df_usuarios.columns = ["Usuário", "Nome", "Perfil", "Ativo", "Participa das inspeções", "Troca pendente", "Bloqueado"]
-        st.dataframe(df_usuarios, use_container_width=True, hide_index=True)
+        filtro_ano = st.selectbox("Filtrar por ano de mandato", ["Todos"] + anos_existentes)
+        linhas = [
+            {"Usuário": u["login"], "Nome": u["nome"], "Perfil": u["perfil"], "Ativo": u["ativo"],
+             "Mandatos": ", ".join(str(a) for a in mandatos.get(u["login"], [])),
+             "Troca pendente": u["trocar_senha"], "Bloqueado": u["bloqueado"]}
+            for u in usuarios if filtro_ano == "Todos" or filtro_ano in mandatos.get(u["login"], [])
+        ]
+        st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum usuário cadastrado no banco.")
 
@@ -396,15 +451,40 @@ def pagina_gerenciar_usuarios():
                 st.session_state["senhas_geradas"] = migrar_usuarios_secrets()
             st.rerun()
 
+    cipeiros_ativos = [u for u in usuarios if u["perfil"] == "cipeiro" and u["ativo"]]
+    if cipeiros_ativos:
+        st.divider()
+        st.subheader("Renovar gestão")
+        ano_novo_mandato = int(st.number_input(
+            "Ano do novo mandato", min_value=2020, max_value=2100, step=1,
+            value=(max(anos_existentes) + 1) if anos_existentes else ano_atual(),
+        ))
+        rotulos = {u["login"]: f"{u['nome']} ({u['login']})" for u in cipeiros_ativos}
+        padrao = [u["login"] for u in cipeiros_ativos
+                  if {ano_novo_mandato - 1, ano_novo_mandato} & set(mandatos.get(u["login"], []))]
+        continuam = st.multiselect("Continuam no mandato", list(rotulos), default=padrao,
+                                   format_func=lambda l: rotulos[l], key=f"continuam_{ano_novo_mandato}")
+        saem = [rotulos[l] for l in rotulos if l not in continuam]
+        if saem:
+            st.caption("Serão desativados: " + ", ".join(saem))
+        confirmou = st.checkbox("Confirmo a renovação da gestão", key=f"confirma_{ano_novo_mandato}")
+        if st.button("Renovar gestão", disabled=not confirmou):
+            desativados = renovar_gestao(ano_novo_mandato, set(continuam))
+            st.session_state["aviso_admin"] = (
+                f"Gestão {ano_novo_mandato} registrada: {len(continuam)} com mandato, {len(desativados)} desativado(s)."
+            )
+            st.rerun()
+
     st.divider()
     st.subheader("Novo usuário")
     with st.form("novo_usuario", clear_on_submit=True):
         c1, c2 = st.columns(2)
         login_novo = c1.text_input("Usuário (login)")
         nome_novo = c2.text_input("Nome completo")
-        c3, c4 = st.columns(2)
+        c3, c4, c5 = st.columns(3)
         perfil_novo = c3.selectbox("Perfil", ["cipeiro", "gestor", "admin"])
-        inspetor_novo = c4.checkbox("Participa das inspeções (matriz de engajamento)", value=True)
+        com_mandato = c4.checkbox("Cipeiro com mandato", value=True)
+        ano_mandato_novo = int(c5.number_input("Ano do mandato", min_value=2020, max_value=2100, step=1, value=ano_atual()))
         if st.form_submit_button("Criar usuário"):
             login = login_novo.strip().lower()
             if not re.fullmatch(r"[a-z0-9._-]{3,40}", login) or not nome_novo.strip():
@@ -412,7 +492,9 @@ def pagina_gerenciar_usuarios():
             elif login in logins_banco:
                 st.error("Usuário já cadastrado.")
             else:
-                senha = criar_usuario(login, nome_novo.strip(), perfil_novo, inspetor_novo)
+                senha = criar_usuario(login, nome_novo.strip(), perfil_novo, com_mandato)
+                if com_mandato:
+                    definir_mandato(login, ano_mandato_novo, True)
                 st.session_state["senhas_geradas"] = [(login, nome_novo.strip(), perfil_novo, senha)]
                 st.rerun()
 
@@ -424,7 +506,9 @@ def pagina_gerenciar_usuarios():
         sel = mapa[login_sel]
         proprio = login_sel == st.session_state.get("usuario_logado")
         b1, b2, b3 = st.columns(3)
-        if b1.button("Redefinir senha"):
+        if proprio:
+            st.caption("Para alterar a sua própria senha, use Minha Conta.")
+        if b1.button("Redefinir senha", disabled=proprio):
             st.session_state["senhas_geradas"] = [(login_sel, sel["nome"], sel["perfil"], redefinir_senha(login_sel))]
             st.rerun()
         if b2.button("Desativar" if sel["ativo"] else "Ativar", disabled=proprio):
@@ -433,15 +517,20 @@ def pagina_gerenciar_usuarios():
         if b3.button("Desbloquear", disabled=not sel["bloqueado"]):
             desbloquear_usuario(login_sel)
             st.rerun()
-        c5, c6 = st.columns(2)
         perfis = ["cipeiro", "gestor", "admin"]
-        perfil_sel = c5.selectbox("Perfil", perfis, index=perfis.index(sel["perfil"]), disabled=proprio, key=f"perfil_{login_sel}")
-        inspetor_sel = c6.checkbox("Participa das inspeções", value=sel["inspetor"], key=f"inspetor_{login_sel}")
-        if st.button("Salvar perfil e participação"):
-            if perfil_sel != sel["perfil"] and not proprio:
-                atualizar_usuario(login_sel, "perfil", perfil_sel)
-            if inspetor_sel != sel["inspetor"]:
-                atualizar_usuario(login_sel, "inspetor", inspetor_sel)
+        c6, c7 = st.columns([3, 1])
+        perfil_sel = c6.selectbox("Perfil", perfis, index=perfis.index(sel["perfil"]), disabled=proprio, key=f"perfil_{login_sel}")
+        if c7.button("Salvar perfil", disabled=proprio or perfil_sel == sel["perfil"]):
+            atualizar_usuario(login_sel, "perfil", perfil_sel)
+            st.rerun()
+        c8, c9, c10 = st.columns([2, 1, 1])
+        ano_mandato = int(c8.number_input("Ano do mandato", min_value=2020, max_value=2100, step=1,
+                                          value=ano_atual(), key=f"ano_mandato_{login_sel}"))
+        if c9.button("Adicionar mandato"):
+            definir_mandato(login_sel, ano_mandato, True)
+            st.rerun()
+        if c10.button("Remover mandato"):
+            definir_mandato(login_sel, ano_mandato, False)
             st.rerun()
 
 if not check_password():
@@ -457,7 +546,7 @@ if st.session_state.get("trocar_senha"):
 lista_perguntas = st.secrets.get("lista_perguntas_cipa", [])
 lista_setores = st.secrets.get("lista_setores", [])
 lista_responsaveis = st.secrets.get("lista_responsaveis", [])
-lista_completa_cipeiros = nomes_inspetores_ativos() or st.secrets.get("lista_todos_cipeiros", [])
+lista_completa_cipeiros = nomes_cipeiros_do_ano(ano_atual(), True) or st.secrets.get("lista_todos_cipeiros", [])
 
 # ==========================================
 # CONFIGURAÇÃO CLOUDINARY
@@ -910,10 +999,13 @@ elif pagina == "Dashboard de Indicadores":
                         
                 tabela_dinamica = tabela_dinamica[ordem_meses]
                 
-                if ano_matriz == ano_atual_sistema:
+                if ano_matriz.isdigit():
+                    lista_matriz = nomes_cipeiros_do_ano(int(ano_matriz), False)
+                    if not lista_matriz and ano_matriz == ano_atual_sistema:
+                        lista_matriz = st.secrets.get("lista_todos_cipeiros", [])
                     cipeiros_no_banco = tabela_dinamica.index.tolist()
-                    cipeiros_faltantes = [c for c in lista_completa_cipeiros if c not in cipeiros_no_banco]
-                    
+                    cipeiros_faltantes = [c for c in lista_matriz if c not in cipeiros_no_banco]
+
                     for c in cipeiros_faltantes:
                         tabela_dinamica.loc[c] = ['❌'] * 12
                         
