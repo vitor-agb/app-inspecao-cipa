@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 import hashlib
 import hmac
@@ -59,9 +60,9 @@ st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 st.markdown("""
     <style>
     @import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Ubuntu:wght@400;500;700&display=swap");
-    :root {--c-brand:#2b7a2e; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161d25; --c-mut:#56616b; --c-bd:#dce2dd; --c-sel:#e1f2e7; --c-realce:#ffb200; --c-side:#161d25;}
+    :root {--c-brand:#2b7a2e; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161d25; --c-mut:#56616b; --c-bd:#dce2dd; --c-sel:#e1f2e7; --c-realce:#ffb200; --c-side:#161d25; --c-bd-forte:#b9c2bc; --c-bad:#b0322a; --c-badb:#fae3e0;}
     @media (prefers-color-scheme: dark) {
-        :root {--c-brand:#a4e745; --c-brand-tx:#161d25; --c-card:#161d25; --c-tx:#eef2ef; --c-mut:#9aa6b0; --c-bd:#2a3540; --c-sel:#25341f; --c-side:#0a0e12;}
+        :root {--c-brand:#a4e745; --c-brand-tx:#161d25; --c-card:#161d25; --c-tx:#eef2ef; --c-mut:#9aa6b0; --c-bd:#2a3540; --c-sel:#25341f; --c-side:#0a0e12; --c-bd-forte:#46535f; --c-bad:#f2928a; --c-badb:#3e1f1c;}
     }
     html, body, .stApp, [data-testid="stAppViewContainer"] {font-family: Lato, system-ui, "Segoe UI", Arial, sans-serif;}
     h1, h2, h3, h4, [data-testid="stMetricValue"] {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif !important;}
@@ -90,6 +91,31 @@ st.markdown("""
     [data-testid="stSidebar"] button svg {color: #e9eeea;}
     .marca-lateral {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: .12em; color: #e9eeea; line-height: 1.1;}
     .submarca-lateral {color: #a4e745; font-size: 12px; margin: 2px 0 14px 0;}
+    [data-testid="stSidebar"] button span {color: #e9eeea !important;}
+    [data-testid="stSidebar"] iframe {background: var(--c-side); color-scheme: dark; border-radius: 0;}
+    [data-testid="stSidebarCollapseButton"] button, [data-testid="stExpandSidebarButton"], [data-testid="stMainMenuButton"] {min-width: 44px; min-height: 44px;}
+    [data-testid="stFileUploaderDropzoneInstructions"] {display: none !important;}
+    [data-testid="stAppDeployButton"] {display: none !important;}
+    [data-testid="InputInstructions"] {display: none !important;}
+    div[role="radiogroup"] label:has(input:checked) {background: var(--c-sel); border-color: var(--c-brand);}
+    div[role="radiogroup"] label:has(input[value="1"]:checked) {background: var(--c-badb); border-color: var(--c-bad);}
+    @media (max-width: 768px) {
+        .stButton > button, [data-testid^="stBaseButton"], [data-testid="stFormSubmitButton"] button, .stDownloadButton button {min-height: 48px; width: 100%;}
+        div[role="radiogroup"] {gap: 8px;}
+        div[role="radiogroup"] label {min-height: 48px; padding: 0 14px; border: 1px solid var(--c-bd-forte); border-radius: 8px; align-items: center;}
+        [data-testid="stCheckbox"] label {min-height: 44px; align-items: center;}
+        input, textarea, [data-baseweb="select"] * {font-size: 16px !important;}
+        input, [data-baseweb="select"] > div {min-height: 44px;}
+        [data-testid="stElementToolbar"] {display: none !important;}
+        [data-testid="stElementContainer"]:has(> .stButton), [data-testid="stElementContainer"]:has(> .stDownloadButton),
+        [data-testid="stFormSubmitButton"] {width: 100% !important;}
+        [data-testid="stExpander"] summary {min-height: 44px !important;}
+        [data-testid="stTextInput"] button, [data-testid="stNumberInputStepUp"], [data-testid="stNumberInputStepDown"] {min-width: 44px; min-height: 44px;}
+        [data-baseweb="tag"] span[role="presentation"], [data-baseweb="tag"] svg {padding: 14px; margin: -14px;}
+        [data-baseweb="select"] [value], [data-baseweb="popover"] li, [data-baseweb="menu"] li {white-space: normal; overflow-wrap: anywhere;}
+        [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]) {width: 100% !important;}
+        h1 {font-size: 26px !important; line-height: 1.2 !important;}
+    }
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
     div[data-testid="stFileUploader"] section > div[data-testid="stMarkdownContainer"] {display: none !important;}
@@ -470,7 +496,7 @@ def pagina_gerenciar_usuarios():
              "Troca pendente": u["trocar_senha"], "Bloqueado": u["bloqueado"]}
             for u in usuarios if filtro_ano == "Todos" or filtro_ano in mandatos.get(u["login"], [])
         ]
-        st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(linhas), width="stretch", hide_index=True)
     else:
         st.info("Nenhum usuário cadastrado no banco.")
 
@@ -763,6 +789,13 @@ def confirmar_imagens(public_ids):
         except Exception:
             pass
 
+def validar_respostas(respostas):
+    # Todos os itens do checklist devem ter resposta (S, N ou N/A); retorna a mensagem de pendência ou lista vazia.
+    pendentes = [chave[1:] for chave, resposta in respostas.items() if resposta is None]
+    if pendentes:
+        return ["Responda todos os itens antes de salvar. Pendentes: " + ", ".join(pendentes) + "."]
+    return []
+
 def validar_fotos(fotos_capturadas, foto_geral):
     # Fotos são opcionais; cada arquivo anexado respeita LIMITE_BYTES.
     erros = []
@@ -794,10 +827,10 @@ with st.sidebar:
         icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
         default_index=0,
         styles={
-            "container": {"padding": "0", "background-color": COR_LATERAL},
+            "container": {"padding": "0", "background-color": COR_LATERAL, "border-radius": "0"},
             "nav": {"background-color": COR_LATERAL},
             "icon": {"color": "#e9eeea", "font-size": "16px"},
-            "nav-link": {"color": "#e9eeea", "font-size": "15px", "border-radius": "10px", "margin": "2px 0", "--hover-color": "#232d38"},
+            "nav-link": {"color": "#e9eeea", "font-size": "13px", "padding": "12px 10px", "border-radius": "10px", "margin": "2px 0", "--hover-color": "#232d38"},
             "nav-link-selected": {"background-color": "#a4e745", "color": "#161d25", "font-weight": "600"},
         })
     st.caption(f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado')} ({perfil_atual})")
@@ -808,6 +841,25 @@ with st.sidebar:
 if pagina not in paginas_permitidas:
     st.error("Acesso não autorizado para o perfil atual.")
     st.stop()
+
+# Troca de página: rolagem ao topo e, em telas estreitas (o menu lateral cobre o conteúdo), recolhimento do menu.
+# O marcador único força a remontagem do iframe e a nova execução do script a cada troca.
+if st.session_state.get("_menu_pagina") != pagina:
+    components.html(
+        "<!-- " + str(time.time_ns()) + " --><script>"
+        "const doc = window.parent.document;"
+        "const principal = doc.querySelector('[data-testid=\"stMain\"]');"
+        "if (principal) { principal.scrollTo(0, 0); }"
+        "window.parent.scrollTo(0, 0);"
+        "const recolher = () => {"
+        "  const b = doc.querySelector('[data-testid=\"stSidebarCollapseButton\"] button');"
+        "  if (b && window.parent.innerWidth <= 768) { b.click(); }"
+        "};"
+        "recolher(); setTimeout(recolher, 400);"
+        "</script>",
+        height=0,
+    )
+st.session_state["_menu_pagina"] = pagina
 
 # ==========================================
 # INTERFACE: NOVA INSPEÇÃO
@@ -875,20 +927,28 @@ if pagina == "Nova Inspeção":
             motivo_justificativa = st.text_area("Motivo da não realização (Obrigatório):")
         else:
             for i, pergunta in enumerate(lista_perguntas, start=1):
-                respostas[f"q{i}"] = st.radio(f"**{i}.** {pergunta}", ["S", "N", "N/A"], horizontal=True, key=f"r_q{i}")
+                respostas[f"q{i}"] = st.radio(f"**{i}.** {pergunta}", ["S", "N", "N/A"], horizontal=True, index=None, key=f"r_q{i}")
                 observacoes[f"obs{i}"] = st.text_input(f"Observação:", key=f"t_o{i}") if respostas[f"q{i}"] in ["N", "N/A"] else ""
-                fotos_capturadas[f"foto_q{i}"] = st.file_uploader("📸 Anexar foto", type=["jpg", "jpeg", "png"], key=f"up_q{i}", accept_multiple_files=True)
+                with st.expander("📸 Anexar foto (opcional)"):
+                    st.caption("JPG ou PNG, até 10 MB por foto.")
+                    fotos_capturadas[f"foto_q{i}"] = st.file_uploader("Foto", type=["jpg", "jpeg", "png"], key=f"up_q{i}", accept_multiple_files=True, label_visibility="collapsed")
                 st.write("---")
             
             obs_geral = st.text_area("Observações Gerais")
-            foto_geral = st.file_uploader("📸 Foto Geral", type=["jpg", "jpeg", "png"], key="u_g", accept_multiple_files=True)
+            with st.expander("📸 Foto Geral (opcional)"):
+                st.caption("JPG ou PNG, até 10 MB por foto.")
+                foto_geral = st.file_uploader("Foto geral", type=["jpg", "jpeg", "png"], key="u_g", accept_multiple_files=True, label_visibility="collapsed")
+
+        if not justificada and respostas:
+            respondidos = sum(1 for resposta in respostas.values() if resposta is not None)
+            st.caption(f"{respondidos} de {len(respostas)} itens respondidos")
 
         if st.button("Salvar Inspeção", type="primary"):
             erros_validacao = []
             if justificada and not motivo_justificativa.strip():
                 erros_validacao.append("Preenchimento obrigatório: Motivo da não realização.")
             elif not justificada:
-                erros_validacao = validar_fotos(fotos_capturadas, foto_geral)
+                erros_validacao = validar_respostas(respostas) + validar_fotos(fotos_capturadas, foto_geral)
 
             if erros_validacao:
                 for mensagem in erros_validacao:
@@ -1019,9 +1079,10 @@ elif pagina == "Dashboard de Indicadores":
                     barras = alt.Chart(df_medias_setor).mark_bar(color="#4fb253" if tema_escuro() else "#359138").encode(
                         y=alt.Y('setor_curto', title=None, sort='-x'),
                         x=alt.X('nota_porcentagem', title='Conformidade (%)', scale=alt.Scale(domain=[0, 115]))
-                    )
-                    textos = barras.mark_text(align='left', dx=5, fontWeight='bold', color='gray').encode(text='rotulo:N')
-                    st.altair_chart(barras + textos, use_container_width=True)
+                    ).properties(height=alt.Step(36))
+                    textos = barras.mark_text(align='left', dx=5, fontSize=13, fontWeight='bold',
+                                              color="#9aa6b0" if tema_escuro() else "#56616b").encode(text='rotulo:N')
+                    st.altair_chart(barras + textos, width="stretch")
             else:
                 st.info("Registros insuficientes para aplicação dos filtros selecionados.")
             
@@ -1065,9 +1126,11 @@ elif pagina == "Dashboard de Indicadores":
                 
                 st.dataframe(
                     tabela_dinamica, 
-                    use_container_width=True, 
-                    hide_index=True
+                    width="stretch", 
+                    hide_index=True,
+                    column_config={"Nome do Cipeiro": st.column_config.TextColumn("Nome do Cipeiro", pinned=True)}
                 )
+                st.caption("Deslize a tabela para o lado para ver todos os meses.")
                 st.caption("**Legenda:** ✅ Inspeção Realizada | 🚷 Ausência Justificada | ❌ Pendente / Não Realizada")
 
     except Exception as e:
@@ -1103,22 +1166,25 @@ elif pagina == "Galeria de Evidências":
             
             if inspecao_sel != "-- Selecione --":
                 linha = df_f[df_f['id_menu'] == inspecao_sel].iloc[0]
+                campos_foto = ["foto_geral"] + [f"foto_q{i}" for i in range(1, len(lista_perguntas) + 1)]
+                if not any("http" in str(linha.get(campo)) for campo in campos_foto):
+                    st.info("Esta inspeção não tem fotos anexadas.")
                 def renderizar(links):
                     lks = [l.strip() for l in str(links).split(',') if "http" in l]
                     if lks:
                         cols = st.columns(4)
                         for idx, lk in enumerate(lks):
                             with cols[idx % 4]:
-                                st.image(lk, use_container_width=True)
+                                st.image(lk, width="stretch")
                                 st.markdown(f'<a href="{lk}" target="_blank" style="text-decoration:none; font-size:11px; color:gray;">🔍 Original</a>', unsafe_allow_html=True)
 
-                if str(linha.get('foto_geral')).strip():
+                if "http" in str(linha.get('foto_geral')):
                     st.markdown("#### 📸 Foto Geral")
                     renderizar(linha['foto_geral'])
                 
                 for i in range(1, len(lista_perguntas) + 1):
                     col_f = f"foto_q{i}"
-                    if str(linha.get(col_f)).strip():
+                    if "http" in str(linha.get(col_f)):
                         st.markdown(f"**Item {i}:** {lista_perguntas[i-1]}")
                         if pd.notna(linha.get(f"obs{i}")) and str(linha[f"obs{i}"]).strip() != "":
                             st.caption(f"📝 *Obs:* {linha[f'obs{i}']}")
@@ -1136,7 +1202,15 @@ elif pagina == "Histórico de Dados":
         if not df.empty:
             df_ex = df.copy()
             df_ex['data_execucao'] = pd.to_datetime(df_ex['data_execucao']).dt.strftime('%d/%m/%Y %H:%M')
-            st.dataframe(df_ex, use_container_width=True, hide_index=True)
+            st.caption("Deslize a tabela para o lado para ver todas as colunas.")
+            nomes_colunas = {
+                "id": "ID", "mes_referencia": "Mês de referência", "setor": "Setor", "responsavel_area": "Responsável da área",
+                "data_execucao": "Data da execução", "cipeiro": "Cipeiro", "acompanhantes": "Acompanhantes",
+                "status": "Status", "obs_geral": "Observações gerais", "foto_geral": "Fotos gerais",
+            }
+            for i in range(1, len(lista_perguntas) + 1):
+                nomes_colunas.update({f"q{i}": f"Q{i}", f"obs{i}": f"Obs. {i}", f"foto_q{i}": f"Fotos Q{i}"})
+            st.dataframe(df_ex.rename(columns=nomes_colunas), width="stretch", hide_index=True)
             csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig').encode('utf-8-sig')
             st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
     except Exception as e:
