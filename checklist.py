@@ -115,6 +115,7 @@ st.markdown("""
         [data-baseweb="select"] [value], [data-baseweb="popover"] li, [data-baseweb="menu"] li {white-space: normal; overflow-wrap: anywhere;}
         [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]) {width: 100% !important;}
         h1 {font-size: 26px !important; line-height: 1.2 !important;}
+        [data-testid="stSidebar"][aria-expanded="true"] {width: 100vw !important; min-width: 100vw !important; max-width: 100vw !important;}
     }
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
