@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import io
 import re
+import secrets as aleatorio
 import time
 import unicodedata
 from PIL import Image, ImageOps
@@ -23,19 +24,29 @@ QUALIDADE_JPEG = 80
 # Janela (segundos) em que um novo registro do mesmo cipeiro, setor, mês e status é tratado como envio duplicado.
 JANELA_DUPLICIDADE_SEGUNDOS = 120
 
-# Sessão: encerramento por inatividade (segundos) e páginas liberadas por perfil.
+# Sessão, bloqueio de login, política de senha e páginas liberadas por perfil.
 SESSAO_INATIVIDADE_SEGUNDOS = 8 * 60 * 60
-TODAS_AS_PAGINAS = ["Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Histórico de Dados"]
+REVALIDACAO_SEGUNDOS = 5 * 60
+MAX_TENTATIVAS_LOGIN = 5
+BLOQUEIO_MINUTOS = 15
+TAMANHO_MINIMO_SENHA = 6
+ITERACOES_HASH = 600_000
+ORDEM_PAGINAS = [
+    "Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências",
+    "Histórico de Dados", "Minha Conta", "Gerenciar Usuários",
+]
 ICONES_PAGINAS = {
     "Nova Inspeção": "clipboard-check",
     "Dashboard de Indicadores": "bar-chart-line",
     "Galeria de Evidências": "images",
     "Histórico de Dados": "archive",
+    "Minha Conta": "person-circle",
+    "Gerenciar Usuários": "people",
 }
 PAGINAS_POR_PERFIL = {
-    "cipeiro": ["Nova Inspeção", "Dashboard de Indicadores"],
-    "gestor": TODAS_AS_PAGINAS,
-    "admin": TODAS_AS_PAGINAS,
+    "cipeiro": {"Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Minha Conta"},
+    "gestor": {"Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Histórico de Dados", "Minha Conta"},
+    "admin": set(ORDEM_PAGINAS),
 }
 
 # ==========================================
@@ -56,6 +67,38 @@ st.markdown("""
 # ==========================================
 # AUTENTICAÇÃO
 # ==========================================
+def _transitorio(erro):
+    mensagem = str(erro).lower()
+    return any(termo in mensagem for termo in ("ssl", "closed", "operationalerror", "connection", "timeout"))
+
+def executar_sql(sql, parametros=None, leitura=True):
+    # Executa uma instrução; repete em falhas transitórias de conexão (banco serverless em repouso).
+    for tentativa in range(3):
+        try:
+            conn_db = st.connection("postgresql", type="sql")
+            with conn_db.session as session:
+                resultado = session.execute(text(sql), parametros or {})
+                if leitura:
+                    return [dict(linha) for linha in resultado.mappings().all()]
+                session.commit()
+                return None
+        except Exception as e:
+            if tentativa < 2 and _transitorio(e):
+                st.cache_resource.clear()
+                time.sleep(2)
+                continue
+            raise
+
+def gerar_hash_senha(senha):
+    sal = aleatorio.token_bytes(16)
+    derivado = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), sal, ITERACOES_HASH)
+    return f"pbkdf2_sha256${ITERACOES_HASH}${sal.hex()}${derivado.hex()}"
+
+def gerar_senha_provisoria(tamanho=6):
+    # Alfabeto sem caracteres ambíguos (i, l, o, 0, 1); senha curta por adequação ao uso operacional.
+    alfabeto = "abcdefghjkmnpqrstuvwxyz23456789"
+    return "".join(aleatorio.choice(alfabeto) for _ in range(tamanho))
+
 def verificar_senha(informada, armazenada):
     # Aceita hash "pbkdf2_sha256$iteracoes$sal_hex$hash_hex" ou, durante a transição, senha em texto puro.
     armazenada = str(armazenada)
@@ -68,13 +111,189 @@ def verificar_senha(informada, armazenada):
         return hmac.compare_digest(calculado, esperado)
     return hmac.compare_digest(informada.encode("utf-8"), armazenada.encode("utf-8"))
 
-def obter_perfil(usuario):
-    # Perfis em st.secrets["perfis"]. Sem a seção, todos operam como admin (compatibilidade); login não listado = cipeiro.
+def _normalizar_usuario(usuario):
+    for campo in ("trocar_senha", "ativo", "inspetor", "bloqueado"):
+        if campo in usuario:
+            usuario[campo] = bool(usuario[campo])
+    return usuario
+
+_SELECT_BLOQUEADO = "CASE WHEN bloqueado_ate IS NOT NULL AND bloqueado_ate > :agora THEN 1 ELSE 0 END AS bloqueado"
+
+def buscar_usuario(login):
+    linhas = executar_sql(
+        "SELECT login, nome, perfil, senha_hash, trocar_senha, ativo, inspetor, tentativas_falhas, "
+        f"{_SELECT_BLOQUEADO} FROM usuarios_cipa WHERE login = :login",
+        {"login": login, "agora": datetime.now()},
+    )
+    return _normalizar_usuario(linhas[0]) if linhas else None
+
+def listar_usuarios():
+    linhas = executar_sql(
+        f"SELECT login, nome, perfil, ativo, inspetor, trocar_senha, {_SELECT_BLOQUEADO} FROM usuarios_cipa ORDER BY nome",
+        {"agora": datetime.now()},
+    )
+    return [_normalizar_usuario(linha) for linha in linhas]
+
+@st.cache_data(ttl=60)
+def nomes_inspetores_ativos():
+    # Nomes dos usuários ativos que participam das inspeções (lista do formulário e da matriz de engajamento).
+    try:
+        linhas = executar_sql(
+            "SELECT nome FROM usuarios_cipa WHERE ativo = :ativo AND inspetor = :inspetor ORDER BY nome",
+            {"ativo": True, "inspetor": True},
+        )
+    except Exception:
+        return []
+    return [linha["nome"] for linha in linhas]
+
+def criar_usuario(login, nome, perfil, inspetor):
+    senha = gerar_senha_provisoria()
+    executar_sql(
+        "INSERT INTO usuarios_cipa (login, nome, perfil, senha_hash, trocar_senha, ativo, inspetor, tentativas_falhas, atualizado_em) "
+        "VALUES (:login, :nome, :perfil, :hash, :trocar, :ativo, :inspetor, 0, :agora)",
+        {"login": login, "nome": nome, "perfil": perfil, "hash": gerar_hash_senha(senha),
+         "trocar": True, "ativo": True, "inspetor": bool(inspetor), "agora": datetime.now()},
+        leitura=False,
+    )
+    nomes_inspetores_ativos.clear()
+    return senha
+
+def redefinir_senha(login):
+    senha = gerar_senha_provisoria()
+    executar_sql(
+        "UPDATE usuarios_cipa SET senha_hash = :hash, trocar_senha = :trocar, tentativas_falhas = 0, "
+        "bloqueado_ate = NULL, atualizado_em = :agora WHERE login = :login",
+        {"hash": gerar_hash_senha(senha), "trocar": True, "agora": datetime.now(), "login": login},
+        leitura=False,
+    )
+    return senha
+
+def alterar_senha(login, nova):
+    executar_sql(
+        "UPDATE usuarios_cipa SET senha_hash = :hash, trocar_senha = :trocar, tentativas_falhas = 0, "
+        "bloqueado_ate = NULL, atualizado_em = :agora WHERE login = :login",
+        {"hash": gerar_hash_senha(nova), "trocar": False, "agora": datetime.now(), "login": login},
+        leitura=False,
+    )
+
+def atualizar_usuario(login, campo, valor):
+    if campo not in ("ativo", "perfil", "inspetor", "nome"):
+        raise ValueError(campo)
+    executar_sql(
+        f"UPDATE usuarios_cipa SET {campo} = :valor, atualizado_em = :agora WHERE login = :login",
+        {"valor": valor, "agora": datetime.now(), "login": login},
+        leitura=False,
+    )
+    nomes_inspetores_ativos.clear()
+
+def desbloquear_usuario(login):
+    executar_sql(
+        "UPDATE usuarios_cipa SET tentativas_falhas = 0, bloqueado_ate = NULL, atualizado_em = :agora WHERE login = :login",
+        {"agora": datetime.now(), "login": login},
+        leitura=False,
+    )
+
+def migrar_usuarios_secrets():
+    # Cria no banco os usuários definidos em st.secrets que ainda não existem, com senha provisória individual.
+    usuarios_secrets = st.secrets.get("usuarios", {})
+    nomes = st.secrets.get("nomes_cipeiros", {})
+    perfis = st.secrets.get("perfis")
+    lista_inspetores = st.secrets.get("lista_todos_cipeiros", [])
+    existentes = {u["login"] for u in listar_usuarios()}
+    geradas = []
+    for login_bruto in usuarios_secrets:
+        login = str(login_bruto).strip().lower()
+        if login in existentes:
+            continue
+        nome = str(nomes.get(login, login))
+        perfil = str(perfis.get(login, "cipeiro")).strip().lower() if perfis is not None else "cipeiro"
+        if perfil not in PAGINAS_POR_PERFIL:
+            perfil = "cipeiro"
+        senha = criar_usuario(login, nome, perfil, nome in lista_inspetores)
+        geradas.append((login, nome, perfil, senha))
+    return geradas
+
+def obter_perfil_secrets(usuario):
+    # Perfis em st.secrets["perfis"] (contas ainda não migradas). Sem a seção, todos operam como admin; login não listado = cipeiro.
     perfis = st.secrets.get("perfis")
     if perfis is None:
         return "admin"
     perfil = str(perfis.get(usuario, "cipeiro")).strip().lower()
     return perfil if perfil in PAGINAS_POR_PERFIL else "cipeiro"
+
+def _autenticar_secrets(login, senha):
+    usuarios = st.secrets.get("usuarios", {})
+    if login in usuarios and verificar_senha(senha, usuarios.get(login)):
+        nome = st.secrets.get("nomes_cipeiros", {}).get(login)
+        return {"login": login, "nome": nome, "perfil": obter_perfil_secrets(login),
+                "trocar_senha": False, "origem": "secrets"}, None
+    return None, "Credenciais incorretas."
+
+def autenticar(login, senha):
+    # Retorna (usuario, mensagem). Usuário ausente do banco, ou banco indisponível, usa as credenciais de st.secrets.
+    try:
+        usuario = buscar_usuario(login)
+    except Exception:
+        usuario = None
+    if usuario is None:
+        return _autenticar_secrets(login, senha)
+    if not usuario["ativo"]:
+        return None, "Usuário inativo. Procure o administrador."
+    mensagem_bloqueio = f"Acesso bloqueado por excesso de tentativas. Tente novamente em {BLOQUEIO_MINUTOS} minutos."
+    if usuario["bloqueado"]:
+        return None, mensagem_bloqueio
+    if verificar_senha(senha, usuario["senha_hash"]):
+        if usuario["tentativas_falhas"]:
+            try:
+                desbloquear_usuario(login)
+            except Exception:
+                pass
+        usuario["origem"] = "banco"
+        return usuario, None
+    tentativas = int(usuario["tentativas_falhas"] or 0) + 1
+    try:
+        if tentativas >= MAX_TENTATIVAS_LOGIN:
+            executar_sql(
+                "UPDATE usuarios_cipa SET tentativas_falhas = 0, bloqueado_ate = :ate WHERE login = :login",
+                {"ate": datetime.now() + timedelta(minutes=BLOQUEIO_MINUTOS), "login": login},
+                leitura=False,
+            )
+        else:
+            executar_sql(
+                "UPDATE usuarios_cipa SET tentativas_falhas = :tentativas WHERE login = :login",
+                {"tentativas": tentativas, "login": login},
+                leitura=False,
+            )
+    except Exception:
+        pass
+    return None, (mensagem_bloqueio if tentativas >= MAX_TENTATIVAS_LOGIN else "Credenciais incorretas.")
+
+def iniciar_sessao(usuario):
+    agora = time.time()
+    st.session_state.update({
+        "password_correct": True, "usuario_logado": usuario["login"], "nome_usuario": usuario.get("nome"),
+        "perfil": usuario["perfil"], "origem": usuario["origem"], "trocar_senha": usuario.get("trocar_senha", False),
+        "ultimo_acesso": agora, "ultima_validacao": agora,
+    })
+
+def sessao_valida():
+    # Reavalia usuários do banco periodicamente: desativação e troca de perfil valem sem novo login.
+    if st.session_state.get("origem") != "banco":
+        return True
+    agora = time.time()
+    if agora - st.session_state.get("ultima_validacao", 0) < REVALIDACAO_SEGUNDOS:
+        return True
+    try:
+        usuario = buscar_usuario(st.session_state["usuario_logado"])
+    except Exception:
+        return True
+    if usuario is None or not usuario["ativo"]:
+        return False
+    st.session_state.update({
+        "perfil": usuario["perfil"], "nome_usuario": usuario["nome"],
+        "trocar_senha": usuario["trocar_senha"], "ultima_validacao": agora,
+    })
+    return True
 
 def encerrar_sessao():
     st.session_state.clear()
@@ -85,6 +304,9 @@ def check_password():
         if agora - st.session_state.get("ultimo_acesso", agora) > SESSAO_INATIVIDADE_SEGUNDOS:
             encerrar_sessao()
             st.warning("Sessão encerrada por inatividade. Faça login novamente.")
+        elif not sessao_valida():
+            encerrar_sessao()
+            st.warning("Acesso desativado. Procure o administrador.")
         else:
             st.session_state["ultimo_acesso"] = agora
             return True
@@ -93,18 +315,141 @@ def check_password():
         usuario_digitado = st.text_input("Usuário")
         senha_digitada = st.text_input("Senha", type="password")
         if st.form_submit_button("Entrar", type="primary"):
-            dicionario_usuarios = st.secrets.get("usuarios", {})
-            usuario_tratado = usuario_digitado.strip().lower()
-            if usuario_tratado in dicionario_usuarios and verificar_senha(senha_digitada, dicionario_usuarios.get(usuario_tratado)):
-                st.session_state["password_correct"] = True
-                st.session_state["usuario_logado"] = usuario_tratado
-                st.session_state["ultimo_acesso"] = time.time()
+            usuario, mensagem = autenticar(usuario_digitado.strip().lower(), senha_digitada)
+            if usuario:
+                iniciar_sessao(usuario)
                 st.rerun()
             else:
-                st.error("Credenciais incorretas.")
+                st.error(mensagem)
     return False
 
+def validar_nova_senha(login, nova, confirmacao):
+    if nova != confirmacao:
+        return "As senhas não conferem."
+    if len(nova) < TAMANHO_MINIMO_SENHA:
+        return f"A senha deve ter ao menos {TAMANHO_MINIMO_SENHA} caracteres."
+    if nova.strip().lower() == login:
+        return "A senha não pode ser igual ao usuário."
+    return None
+
+def tela_troca_senha(obrigatoria):
+    login = st.session_state["usuario_logado"]
+    st.title("🔑 Definir nova senha" if obrigatoria else "👤 Minha Conta")
+    if st.session_state.get("origem") != "banco":
+        st.info("Esta conta ainda usa a senha antiga. Solicite ao administrador a migração para alterar a senha.")
+        return
+    if obrigatoria:
+        st.warning("Defina uma nova senha para continuar.")
+    with st.form("form_troca_senha", clear_on_submit=True):
+        atual = "" if obrigatoria else st.text_input("Senha atual", type="password")
+        nova = st.text_input("Nova senha", type="password")
+        confirmacao = st.text_input("Confirmar nova senha", type="password")
+        if st.form_submit_button("Salvar nova senha", type="primary"):
+            try:
+                usuario = buscar_usuario(login)
+            except Exception as e:
+                st.error(f"Banco de dados indisponível: {e}")
+                return
+            erro = None
+            if not obrigatoria and not verificar_senha(atual, usuario["senha_hash"]):
+                erro = "Senha atual incorreta."
+            else:
+                erro = validar_nova_senha(login, nova, confirmacao)
+            if not erro and verificar_senha(nova, usuario["senha_hash"]):
+                erro = "A nova senha deve ser diferente da atual."
+            if erro:
+                st.error(erro)
+            else:
+                alterar_senha(login, nova)
+                st.session_state["trocar_senha"] = False
+                if obrigatoria:
+                    st.rerun()
+                st.success("Senha alterada com sucesso.")
+
+def pagina_gerenciar_usuarios():
+    st.title("👥 Gerenciar Usuários")
+    try:
+        usuarios = listar_usuarios()
+    except Exception as e:
+        st.error(f"Tabela de usuários indisponível: {e}")
+        return
+
+    geradas = st.session_state.pop("senhas_geradas", None)
+    if geradas:
+        st.success("Senhas provisórias geradas. Anote agora: não serão exibidas novamente.")
+        st.table(pd.DataFrame(geradas, columns=["Usuário", "Nome", "Perfil", "Senha provisória"]))
+
+    if usuarios:
+        df_usuarios = pd.DataFrame(usuarios)[["login", "nome", "perfil", "ativo", "inspetor", "trocar_senha", "bloqueado"]]
+        df_usuarios.columns = ["Usuário", "Nome", "Perfil", "Ativo", "Participa das inspeções", "Troca pendente", "Bloqueado"]
+        st.dataframe(df_usuarios, use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum usuário cadastrado no banco.")
+
+    logins_banco = {u["login"] for u in usuarios}
+    pendentes_secrets = [str(l).strip().lower() for l in st.secrets.get("usuarios", {}) if str(l).strip().lower() not in logins_banco]
+    if pendentes_secrets:
+        st.divider()
+        st.subheader("Migrar usuários de st.secrets")
+        st.caption(f"{len(pendentes_secrets)} usuário(s) ainda não estão no banco.")
+        if st.button("Migrar usuários e gerar senhas provisórias"):
+            with st.spinner("Criando usuários..."):
+                st.session_state["senhas_geradas"] = migrar_usuarios_secrets()
+            st.rerun()
+
+    st.divider()
+    st.subheader("Novo usuário")
+    with st.form("novo_usuario", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        login_novo = c1.text_input("Usuário (login)")
+        nome_novo = c2.text_input("Nome completo")
+        c3, c4 = st.columns(2)
+        perfil_novo = c3.selectbox("Perfil", ["cipeiro", "gestor", "admin"])
+        inspetor_novo = c4.checkbox("Participa das inspeções (matriz de engajamento)", value=True)
+        if st.form_submit_button("Criar usuário"):
+            login = login_novo.strip().lower()
+            if not re.fullmatch(r"[a-z0-9._-]{3,40}", login) or not nome_novo.strip():
+                st.error("Informe um login (3 a 40 caracteres: letras minúsculas, números, ponto, hífen ou sublinhado) e o nome.")
+            elif login in logins_banco:
+                st.error("Usuário já cadastrado.")
+            else:
+                senha = criar_usuario(login, nome_novo.strip(), perfil_novo, inspetor_novo)
+                st.session_state["senhas_geradas"] = [(login, nome_novo.strip(), perfil_novo, senha)]
+                st.rerun()
+
+    if usuarios:
+        st.divider()
+        st.subheader("Gerenciar usuário existente")
+        mapa = {u["login"]: u for u in usuarios}
+        login_sel = st.selectbox("Usuário", list(mapa), format_func=lambda l: f"{mapa[l]['nome']} ({l})")
+        sel = mapa[login_sel]
+        proprio = login_sel == st.session_state.get("usuario_logado")
+        b1, b2, b3 = st.columns(3)
+        if b1.button("Redefinir senha"):
+            st.session_state["senhas_geradas"] = [(login_sel, sel["nome"], sel["perfil"], redefinir_senha(login_sel))]
+            st.rerun()
+        if b2.button("Desativar" if sel["ativo"] else "Ativar", disabled=proprio):
+            atualizar_usuario(login_sel, "ativo", not sel["ativo"])
+            st.rerun()
+        if b3.button("Desbloquear", disabled=not sel["bloqueado"]):
+            desbloquear_usuario(login_sel)
+            st.rerun()
+        c5, c6 = st.columns(2)
+        perfis = ["cipeiro", "gestor", "admin"]
+        perfil_sel = c5.selectbox("Perfil", perfis, index=perfis.index(sel["perfil"]), disabled=proprio, key=f"perfil_{login_sel}")
+        inspetor_sel = c6.checkbox("Participa das inspeções", value=sel["inspetor"], key=f"inspetor_{login_sel}")
+        if st.button("Salvar perfil e participação"):
+            if perfil_sel != sel["perfil"] and not proprio:
+                atualizar_usuario(login_sel, "perfil", perfil_sel)
+            if inspetor_sel != sel["inspetor"]:
+                atualizar_usuario(login_sel, "inspetor", inspetor_sel)
+            st.rerun()
+
 if not check_password():
+    st.stop()
+
+if st.session_state.get("trocar_senha"):
+    tela_troca_senha(obrigatoria=True)
     st.stop()
 
 # ==========================================
@@ -113,8 +458,7 @@ if not check_password():
 lista_perguntas = st.secrets.get("lista_perguntas_cipa", [])
 lista_setores = st.secrets.get("lista_setores", [])
 lista_responsaveis = st.secrets.get("lista_responsaveis", [])
-lista_completa_cipeiros = st.secrets.get("lista_todos_cipeiros", [])
-mapa_logins = st.secrets.get("nomes_cipeiros", {})
+lista_completa_cipeiros = nomes_inspetores_ativos() or st.secrets.get("lista_todos_cipeiros", [])
 
 # ==========================================
 # CONFIGURAÇÃO CLOUDINARY
@@ -309,14 +653,15 @@ def validar_fotos(fotos_capturadas, foto_geral):
 # ==========================================
 # NAVEGAÇÃO
 # ==========================================
-perfil_atual = obter_perfil(st.session_state.get("usuario_logado"))
-paginas_permitidas = PAGINAS_POR_PERFIL[perfil_atual]
+perfil_atual = st.session_state.get("perfil", "cipeiro")
+paginas_permitidas = [p for p in ORDEM_PAGINAS if p in PAGINAS_POR_PERFIL.get(perfil_atual, PAGINAS_POR_PERFIL["cipeiro"])]
 
 with st.sidebar:
     pagina = option_menu("Menu CIPA",
         paginas_permitidas,
         icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
         menu_icon="shield-check", default_index=0)
+    st.caption(f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado')} ({perfil_atual})")
     if st.button("Sair"):
         encerrar_sessao()
         st.rerun()
@@ -376,7 +721,7 @@ if pagina == "Nova Inspeção":
         with col2:
             data_visivel = st.date_input("Data da Realização", format="DD/MM/YYYY")
             usuario_atual = st.session_state.get("usuario_logado")
-            nome_cipeiro = mapa_logins.get(usuario_atual)
+            nome_cipeiro = st.session_state.get("nome_usuario")
             cipeiro = st.selectbox("Cipeiro Responsável", [nome_cipeiro] if nome_cipeiro in lista_completa_cipeiros else lista_completa_cipeiros)
             acompanhantes = st.text_input("Acompanhantes")
 
@@ -651,7 +996,15 @@ elif pagina == "Histórico de Dados":
             df_ex['data_execucao'] = pd.to_datetime(df_ex['data_execucao']).dt.strftime('%d/%m/%Y %H:%M')
             st.dataframe(df_ex, use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig').encode('utf-8-sig')
-            if perfil_atual == "admin":
-                st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
+            st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
     except Exception as e:
         st.error(f"Erro de processamento: {e}")
+
+# ==========================================
+# MINHA CONTA E GESTÃO DE USUÁRIOS
+# ==========================================
+elif pagina == "Minha Conta":
+    tela_troca_senha(obrigatoria=False)
+
+elif pagina == "Gerenciar Usuários":
+    pagina_gerenciar_usuarios()
