@@ -1,0 +1,28 @@
+name: Manter app acordado
+
+on:
+  schedule:
+    # A cada 8 horas (UTC); a hibernação do Community Cloud ocorre após 12 horas sem tráfego.
+    - cron: "17 */8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acordar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar Playwright
+        run: |
+          pip install playwright==1.49.1
+          playwright install --with-deps chromium
+      - name: Acordar o app
+        run: python .github/scripts/acordar_app.py
+        env:
+          STREAMLIT_APP_URL: ${{ secrets.STREAMLIT_APP_URL }}
