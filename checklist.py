@@ -20,6 +20,9 @@ LIMITE_BYTES = 10 * 1024 * 1024
 LADO_MAXIMO_PX = 1600
 QUALIDADE_JPEG = 80
 
+# Janela (segundos) em que um novo registro do mesmo cipeiro, setor, mês e status é tratado como envio duplicado.
+JANELA_DUPLICIDADE_SEGUNDOS = 120
+
 # Sessão: encerramento por inatividade (segundos) e páginas liberadas por perfil.
 SESSAO_INATIVIDADE_SEGUNDOS = 8 * 60 * 60
 TODAS_AS_PAGINAS = ["Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Histórico de Dados"]
@@ -130,15 +133,35 @@ def salvar_dados(dados_dict):
     colunas = ', '.join(dados_dict.keys())
     marcadores = ', '.join([f":{k}" for k in dados_dict.keys()])
     query_sql = text(f"INSERT INTO inspecoes ({colunas}) VALUES ({marcadores})")
+
+    # Idempotência: lock transacional por (cipeiro, setor, mês) e verificação de registro equivalente recente.
+    # Cobre clique repetido, execuções sobrepostas e nova tentativa após falha de conexão pós-commit.
+    chave_lock = f"{dados_dict['cipeiro']}|{dados_dict['setor']}|{dados_dict['mes_referencia']}"
+    consulta_duplicidade = text(
+        "SELECT 1 FROM inspecoes WHERE cipeiro = :cipeiro AND setor = :setor AND mes_referencia = :mes_referencia "
+        "AND status = :status AND data_execucao BETWEEN :inicio AND :fim LIMIT 1"
+    )
+    janela = timedelta(seconds=JANELA_DUPLICIDADE_SEGUNDOS)
+    parametros_duplicidade = {
+        "cipeiro": dados_dict["cipeiro"], "setor": dados_dict["setor"],
+        "mes_referencia": dados_dict["mes_referencia"], "status": dados_dict["status"],
+        "inicio": dados_dict["data_execucao"] - janela, "fim": dados_dict["data_execucao"] + janela,
+    }
     
     max_tentativas = 2
+    insercao_tentada = False
     for tentativa in range(max_tentativas):
         try:
             conn_db = st.connection("postgresql", type="sql")
             with conn_db.session as session:
+                session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:chave))"), {"chave": chave_lock})
+                if session.execute(consulta_duplicidade, parametros_duplicidade).first() is not None:
+                    # Registro equivalente já existe. Se foi gravado por tentativa anterior desta chamada, é o próprio envio.
+                    return insercao_tentada
+                insercao_tentada = True
                 session.execute(query_sql, dados_dict)
                 session.commit()
-            break 
+            return True 
         except Exception as e:
             erro_str = str(e).lower()
             if ("ssl" in erro_str or "closed" in erro_str or "operationalerror" in erro_str) and tentativa < max_tentativas - 1:
@@ -419,13 +442,17 @@ if pagina == "Nova Inspeção":
                         dados[campo] = ", ".join(urls)
 
                     try:
-                        salvar_dados(dados)
+                        inserido = salvar_dados(dados)
                     except Exception:
                         # salvar_dados já exibe o erro; imagens enviadas são removidas para evitar órfãs.
                         falha_banco = True
                         remover_imagens(enviados)
                     else:
-                        confirmar_imagens(enviados)
+                        # Envio duplicado suprimido: as imagens desta execução não estão vinculadas a nenhum registro.
+                        if inserido:
+                            confirmar_imagens(enviados)
+                        else:
+                            remover_imagens(enviados)
                         # Estado de conclusão gravado imediatamente após o INSERT, antes de qualquer elemento de UI:
                         # uma nova execução disparada por clique repetido renderiza a tela de sucesso e não reenvia o formulário.
                         st.session_state["fotos_pendentes"] = pendentes
