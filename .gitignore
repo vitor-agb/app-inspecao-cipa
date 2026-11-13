@@ -1,0 +1,7 @@
+.streamlit/secrets.toml
+.streamlit/*.toml.bak
+credicencias_supabase.txt
+checklist_bkp_*.py
+checklist - Copia.py
+__pycache__/
+*.pyc
