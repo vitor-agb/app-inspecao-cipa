@@ -55,11 +55,14 @@ PAGINAS_POR_PERFIL = {
 st.set_page_config(page_title="Inspeção CIPA", layout="wide")
 
 # Identidade visual compartilhada com o Estoque 2.0: verde institucional, destaque âmbar, Ubuntu nos títulos e Lato no texto.
-# Tema claro fixo, conforme .streamlit/config.toml.
+# Variáveis claras e escuras seguem o tema do Streamlit (claro ou escuro, conforme o sistema). Barra lateral escura nos dois temas.
 st.markdown("""
     <style>
     @import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Ubuntu:wght@400;500;700&display=swap");
     :root {--c-brand:#1B5E20; --c-brand-tx:#fff; --c-card:#fff; --c-tx:#161616; --c-mut:#5c5c5c; --c-bd:#ccc; --c-sel:#E3EFE4; --c-realce:#FFB200;}
+    @media (prefers-color-scheme: dark) {
+        :root {--c-brand:#A4E745; --c-brand-tx:#161616; --c-card:#1f1f1f; --c-tx:#f2f2f2; --c-mut:#a8a8a8; --c-bd:#3a3a3a; --c-sel:#243a27;}
+    }
     html, body, .stApp, [data-testid="stAppViewContainer"] {font-family: Lato, system-ui, "Segoe UI", Arial, sans-serif;}
     h1, h2, h3, h4, [data-testid="stMetricValue"] {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif !important;}
     h1, h2, h3 {color: var(--c-brand) !important;}
@@ -79,6 +82,14 @@ st.markdown("""
     .destaque-setor .rotulo {color: var(--c-mut); font-size: 12px; text-transform: uppercase; letter-spacing: .04em;}
     .destaque-setor .nome {color: var(--c-tx); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 18px; font-weight: 700;}
     .destaque-setor .valor {color: var(--c-brand); font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-size: 22px; font-weight: 700;}
+    [data-testid="stSidebar"] {background: #161d25 !important; border-right: 0;}
+    [data-testid="stSidebar"], [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {color: #f2f2f2;}
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {color: #93a0ab !important;}
+    [data-testid="stSidebar"] button {background: transparent; border: 1px solid #3a4553; color: #f2f2f2;}
+    [data-testid="stSidebar"] button:hover {border-color: #A4E745; color: #A4E745;}
+    [data-testid="stSidebar"] button svg {color: #f2f2f2;}
+    .marca-lateral {font-family: Ubuntu, Lato, system-ui, Arial, sans-serif; font-weight: 700; font-size: 26px; letter-spacing: .12em; color: #f2f2f2; line-height: 1.1;}
+    .submarca-lateral {color: #A4E745; font-size: 12px; margin: 2px 0 14px 0;}
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
     div[data-testid="stFileUploader"] section > div[data-testid="stMarkdownContainer"] {display: none !important;}
@@ -768,11 +779,17 @@ perfil_atual = st.session_state.get("perfil", "cipeiro")
 paginas_permitidas = [p for p in ORDEM_PAGINAS if p in PAGINAS_POR_PERFIL.get(perfil_atual, PAGINAS_POR_PERFIL["cipeiro"])]
 
 with st.sidebar:
-    pagina = option_menu("Menu CIPA",
+    st.markdown('<div class="marca-lateral">GÊNICA</div><div class="submarca-lateral">CIPA · Inspeções de Segurança</div>', unsafe_allow_html=True)
+    pagina = option_menu(None,
         paginas_permitidas,
         icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
-        menu_icon="shield-check", default_index=0,
-        styles={"nav-link-selected": {"background-color": "#1B5E20", "color": "#ffffff"}, "icon": {"font-size": "16px"}})
+        default_index=0,
+        styles={
+            "container": {"padding": "0", "background-color": "transparent"},
+            "icon": {"color": "#f2f2f2", "font-size": "16px"},
+            "nav-link": {"color": "#f2f2f2", "font-size": "15px", "border-radius": "10px", "margin": "2px 0", "--hover-color": "#262f3a"},
+            "nav-link-selected": {"background-color": "#A4E745", "color": "#161616", "font-weight": "600"},
+        })
     st.caption(f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado')} ({perfil_atual})")
     if st.button("Sair"):
         encerrar_sessao()
