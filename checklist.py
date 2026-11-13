@@ -95,9 +95,8 @@ def gerar_hash_senha(senha):
     return f"pbkdf2_sha256${ITERACOES_HASH}${sal.hex()}${derivado.hex()}"
 
 def gerar_senha_provisoria(tamanho=6):
-    # Alfabeto sem caracteres ambíguos (i, l, o, 0, 1); senha curta por adequação ao uso operacional.
-    alfabeto = "abcdefghjkmnpqrstuvwxyz23456789"
-    return "".join(aleatorio.choice(alfabeto) for _ in range(tamanho))
+    # Senha provisória numérica, de digitação simples; a troca é obrigatória no primeiro acesso.
+    return "".join(aleatorio.choice("0123456789") for _ in range(tamanho))
 
 def verificar_senha(informada, armazenada):
     # Aceita hash "pbkdf2_sha256$iteracoes$sal_hex$hash_hex" ou, durante a transição, senha em texto puro.
