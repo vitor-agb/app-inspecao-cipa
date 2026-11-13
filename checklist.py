@@ -1,12 +1,39 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
+import hashlib
+import hmac
+import io
+import re
 import time
+import unicodedata
+from PIL import Image, ImageOps
 from streamlit_option_menu import option_menu
 import pandas as pd
 import altair as alt
 from sqlalchemy import text 
 import cloudinary
 import cloudinary.uploader
+import cloudinary.api
+
+# Limites de upload: tamanho máximo do arquivo original e parâmetros da versão redimensionada enviada ao Cloudinary.
+LIMITE_BYTES = 10 * 1024 * 1024
+LADO_MAXIMO_PX = 1600
+QUALIDADE_JPEG = 80
+
+# Sessão: encerramento por inatividade (segundos) e páginas liberadas por perfil.
+SESSAO_INATIVIDADE_SEGUNDOS = 8 * 60 * 60
+TODAS_AS_PAGINAS = ["Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Histórico de Dados"]
+ICONES_PAGINAS = {
+    "Nova Inspeção": "clipboard-check",
+    "Dashboard de Indicadores": "bar-chart-line",
+    "Galeria de Evidências": "images",
+    "Histórico de Dados": "archive",
+}
+PAGINAS_POR_PERFIL = {
+    "cipeiro": ["Nova Inspeção", "Dashboard de Indicadores"],
+    "gestor": TODAS_AS_PAGINAS,
+    "admin": TODAS_AS_PAGINAS,
+}
 
 # ==========================================
 # CONFIGURAÇÕES GERAIS E ESTILO
@@ -26,9 +53,38 @@ st.markdown("""
 # ==========================================
 # AUTENTICAÇÃO
 # ==========================================
+def verificar_senha(informada, armazenada):
+    # Aceita hash "pbkdf2_sha256$iteracoes$sal_hex$hash_hex" ou, durante a transição, senha em texto puro.
+    armazenada = str(armazenada)
+    if armazenada.startswith("pbkdf2_sha256$"):
+        try:
+            _, iteracoes, sal, esperado = armazenada.split("$")
+            calculado = hashlib.pbkdf2_hmac("sha256", informada.encode("utf-8"), bytes.fromhex(sal), int(iteracoes)).hex()
+        except ValueError:
+            return False
+        return hmac.compare_digest(calculado, esperado)
+    return hmac.compare_digest(informada.encode("utf-8"), armazenada.encode("utf-8"))
+
+def obter_perfil(usuario):
+    # Perfis em st.secrets["perfis"]. Sem a seção, todos operam como admin (compatibilidade); login não listado = cipeiro.
+    perfis = st.secrets.get("perfis")
+    if perfis is None:
+        return "admin"
+    perfil = str(perfis.get(usuario, "cipeiro")).strip().lower()
+    return perfil if perfil in PAGINAS_POR_PERFIL else "cipeiro"
+
+def encerrar_sessao():
+    st.session_state.clear()
+
 def check_password():
     if st.session_state.get("password_correct", False):
-        return True
+        agora = time.time()
+        if agora - st.session_state.get("ultimo_acesso", agora) > SESSAO_INATIVIDADE_SEGUNDOS:
+            encerrar_sessao()
+            st.warning("Sessão encerrada por inatividade. Faça login novamente.")
+        else:
+            st.session_state["ultimo_acesso"] = agora
+            return True
     st.title("🔒 Acesso Restrito - CIPA")
     with st.form("login_form"):
         usuario_digitado = st.text_input("Usuário")
@@ -36,9 +92,10 @@ def check_password():
         if st.form_submit_button("Entrar", type="primary"):
             dicionario_usuarios = st.secrets.get("usuarios", {})
             usuario_tratado = usuario_digitado.strip().lower()
-            if usuario_tratado in dicionario_usuarios and dicionario_usuarios.get(usuario_tratado) == senha_digitada:
+            if usuario_tratado in dicionario_usuarios and verificar_senha(senha_digitada, dicionario_usuarios.get(usuario_tratado)):
                 st.session_state["password_correct"] = True
                 st.session_state["usuario_logado"] = usuario_tratado
+                st.session_state["ultimo_acesso"] = time.time()
                 st.rerun()
             else:
                 st.error("Credenciais incorretas.")
@@ -109,21 +166,141 @@ def carregar_dados():
                 st.error(f"Falha de conexão com o banco de dados: {e}")
                 return pd.DataFrame()
 
-def processar_upload_imagem(arquivo_bytes, nome_arquivo):
+def slug_pasta(texto):
+    # Normaliza o texto para segmento de pasta: ASCII minúsculo, separado por hífen.
+    base = unicodedata.normalize("NFKD", str(texto)).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "sem-setor"
+
+def comprimir_imagem(conteudo):
+    # Aplica a orientação EXIF, achata transparência em fundo branco, limita o maior lado e recodifica em JPEG.
+    with Image.open(io.BytesIO(conteudo)) as origem:
+        img = ImageOps.exif_transpose(origem)
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            fundo = Image.new("RGB", img.size, (255, 255, 255))
+            fundo.paste(img, mask=img.getchannel("A"))
+            img = fundo
+        else:
+            img = img.convert("RGB")
+        img.thumbnail((LADO_MAXIMO_PX, LADO_MAXIMO_PX))
+        saida = io.BytesIO()
+        img.save(saida, format="JPEG", quality=QUALIDADE_JPEG, optimize=True)
+        return saida.getvalue()
+
+def processar_upload_imagem(arquivo_bytes, pasta, tentativas=2):
+    # Retorna (secure_url, public_id, erro). Os envios recebem a tag "pendente" até a confirmação do INSERT.
     try:
-        resposta = cloudinary.uploader.upload(arquivo_bytes)
-        return resposta.get("secure_url"), None
+        conteudo = comprimir_imagem(arquivo_bytes)
     except Exception as e:
-        return None, str(e)
+        return None, None, f"imagem inválida ({e})"
+    ultimo_erro = None
+    for tentativa in range(tentativas):
+        try:
+            resposta = cloudinary.uploader.upload(
+                conteudo, folder=pasta, tags=["cipa", "pendente"], resource_type="image"
+            )
+            return resposta.get("secure_url"), resposta.get("public_id"), None
+        except Exception as e:
+            ultimo_erro = str(e)
+            if tentativa < tentativas - 1:
+                time.sleep(1.5)
+    return None, None, ultimo_erro
+
+def enviar_anexos(anexos, pasta):
+    # Envia em sequência. Após o primeiro erro os demais anexos não são enviados e seguem como pendentes de reenvio.
+    urls_por_campo, enviados, pendentes, interrompido = {}, [], [], False
+    for campo, rotulo, arquivo in anexos:
+        conteudo = arquivo.getvalue()
+        if not interrompido:
+            url, public_id, erro = processar_upload_imagem(conteudo, pasta)
+            if public_id:
+                enviados.append(public_id)
+            if not erro:
+                urls_por_campo.setdefault(campo, []).append(url)
+                continue
+            interrompido = True
+        pendentes.append({"campo": campo, "rotulo": rotulo, "nome": arquivo.name, "conteudo": conteudo})
+    return urls_por_campo, enviados, pendentes
+
+def anexar_foto(registro, campo, url):
+    # Acrescenta a URL ao campo de foto de uma inspeção já gravada. Chave: data_execucao (tolerância de 1 s), setor e cipeiro.
+    if not re.fullmatch(r"foto_geral|foto_q\d+", campo):
+        return False
+    consulta = text(
+        f"UPDATE inspecoes SET {campo} = CASE WHEN COALESCE({campo}, '') = '' THEN :url ELSE {campo} || ', ' || :url END "
+        "WHERE data_execucao BETWEEN :inicio AND :fim AND setor = :setor AND cipeiro = :cipeiro"
+    )
+    parametros = {
+        "url": url, "setor": registro["setor"], "cipeiro": registro["cipeiro"],
+        "inicio": registro["data_execucao"] - timedelta(seconds=1),
+        "fim": registro["data_execucao"] + timedelta(seconds=1),
+    }
+    try:
+        conn_db = st.connection("postgresql", type="sql")
+        with conn_db.session as session:
+            resultado = session.execute(consulta, parametros)
+            session.commit()
+        return resultado.rowcount > 0
+    except Exception:
+        return False
+
+def reenviar_pendentes(pendentes, registro):
+    # Reenvia as fotos pendentes e vincula cada uma ao registro. Retorna as que continuam pendentes.
+    restantes = []
+    for item in pendentes:
+        url, public_id, erro = processar_upload_imagem(item["conteudo"], registro["pasta"])
+        if erro:
+            restantes.append(item)
+        elif anexar_foto(registro, item["campo"], url):
+            confirmar_imagens([public_id])
+        else:
+            remover_imagens([public_id])
+            restantes.append(item)
+    return restantes
+
+def remover_imagens(public_ids):
+    # Compensação de INSERT/upload com falha. Em erro, as imagens permanecem com a tag "pendente" para varredura posterior.
+    if public_ids:
+        try:
+            cloudinary.api.delete_resources(public_ids, resource_type="image")
+        except Exception:
+            pass
+
+def confirmar_imagens(public_ids):
+    # Remove a tag "pendente" após a persistência da inspeção.
+    if public_ids:
+        try:
+            cloudinary.uploader.remove_tag("pendente", public_ids, resource_type="image")
+        except Exception:
+            pass
+
+def validar_fotos(fotos_capturadas, foto_geral):
+    # Fotos são opcionais; cada arquivo anexado respeita LIMITE_BYTES.
+    erros = []
+    arquivos = [a for lista in fotos_capturadas.values() for a in (lista or [])] + list(foto_geral or [])
+    for arquivo in arquivos:
+        if arquivo.size > LIMITE_BYTES:
+            erros.append(f"{arquivo.name}: excede o limite de {LIMITE_BYTES // (1024 * 1024)} MB.")
+    return erros
 
 # ==========================================
 # NAVEGAÇÃO
 # ==========================================
+perfil_atual = obter_perfil(st.session_state.get("usuario_logado"))
+paginas_permitidas = PAGINAS_POR_PERFIL[perfil_atual]
+
 with st.sidebar:
-    pagina = option_menu("Menu CIPA", 
-        ["Nova Inspeção", "Dashboard de Indicadores", "Galeria de Evidências", "Histórico de Dados"],
-        icons=["clipboard-check", "bar-chart-line", "images", "archive"], 
+    pagina = option_menu("Menu CIPA",
+        paginas_permitidas,
+        icons=[ICONES_PAGINAS[p] for p in paginas_permitidas],
         menu_icon="shield-check", default_index=0)
+    if st.button("Sair"):
+        encerrar_sessao()
+        st.rerun()
+
+if pagina not in paginas_permitidas:
+    st.error("Acesso não autorizado para o perfil atual.")
+    st.stop()
 
 # ==========================================
 # INTERFACE: NOVA INSPEÇÃO
@@ -135,22 +312,23 @@ if pagina == "Nova Inspeção":
         st.title("✅ Inspeção Concluída!")
         st.success("O formulário principal foi salvo com sucesso no banco de dados.")
         
-        # Puxa os erros que guardamos na memória
-        alertas = st.session_state.get("alertas_upload", [])
-        
-        if alertas:
-            st.warning("⚠️ O formulário foi salvo, mas algumas imagens falharam e não foram anexadas:")
-            for alerta in alertas:
-                st.error(alerta)
-            st.info("ℹ️ Você pode ignorar este aviso se as imagens não forem críticas, ou tentar fazer a inspeção novamente mais tarde.")
+        pendentes = st.session_state.get("fotos_pendentes", [])
+        if pendentes:
+            st.warning("⚠️ A inspeção foi salva, mas algumas fotos não foram enviadas:")
+            for item in pendentes:
+                st.write(f"- {item['rotulo']}: {item['nome']}")
+            st.caption("As fotos pendentes só podem ser reenviadas enquanto esta tela estiver aberta.")
+            if st.button("🔄 Reenviar fotos pendentes"):
+                with st.spinner("Reenviando fotos..."):
+                    st.session_state["fotos_pendentes"] = reenviar_pendentes(pendentes, st.session_state["registro_salvo"])
+                st.rerun()
         else:
-            # Só solta balões se TUDO deu 100% certo (dados + imagens)
             st.balloons()
-            
+
         st.divider()
         if st.button("⬅️ Fazer Nova Inspeção", type="primary"):
             st.session_state["tela_sucesso"] = False
-            st.session_state["alertas_upload"] = [] # Limpa os alertas
+            st.session_state["fotos_pendentes"] = []
             st.rerun()
             
     # 2. FORMULÁRIO NORMAL
@@ -161,7 +339,6 @@ if pagina == "Nova Inspeção":
 
         st.title("📝 Nova Inspeção CIPA")
         
-        # ... (SEU CÓDIGO DE COLUNAS E PERGUNTAS CONTINUA IGUAL AQUI) ...
         col1, col2 = st.columns(2)
         with col1:
             c_mes, c_ano = st.columns(2)
@@ -185,6 +362,7 @@ if pagina == "Nova Inspeção":
         
         respostas, observacoes, fotos_capturadas = {}, {}, {}
         motivo_justificativa = ""
+        obs_geral, foto_geral = "", []
 
         if justificada:
             motivo_justificativa = st.text_area("Motivo da não realização (Obrigatório):")
@@ -199,57 +377,65 @@ if pagina == "Nova Inspeção":
             foto_geral = st.file_uploader("📸 Foto Geral", type=["jpg", "jpeg", "png"], key="u_g", accept_multiple_files=True)
 
         if st.button("Salvar Inspeção", type="primary"):
+            erros_validacao = []
             if justificada and not motivo_justificativa.strip():
-                st.error("Preenchimento obrigatório: Motivo da não realização.")
+                erros_validacao.append("Preenchimento obrigatório: Motivo da não realização.")
+            elif not justificada:
+                erros_validacao = validar_fotos(fotos_capturadas, foto_geral)
+
+            if erros_validacao:
+                for mensagem in erros_validacao:
+                    st.error(mensagem)
             else:
+                falha_banco = False
                 with st.spinner("Processando dados e enviando imagens. Por favor, aguarde..."):
+                    pasta = f"cipa/{ano_sel}-{meses.index(mes_sel) + 1:02d}/{slug_pasta(setor)}"
                     dados = {
                         "mes_referencia": mes_referencia, "setor": setor, "responsavel_area": responsavel_area,
-                        "data_execucao": datetime.now(), "cipeiro": cipeiro, "acompanhantes": acompanhantes,
+                        # Data informada no formulário + hora corrente: preserva a ordenação intradiária e a unicidade do rótulo da Galeria.
+                        "data_execucao": datetime.combine(data_visivel, datetime.now().time()), "cipeiro": cipeiro, "acompanhantes": acompanhantes,
                         "status": "Justificada" if justificada else "Realizada"
                     }
-                    
-                    lista_de_erros = [] # Vai guardar os erros de imagem
 
+                    anexos = []
                     for i in range(1, len(lista_perguntas) + 1):
                         chave_foto = f"foto_q{i}"
+                        dados[chave_foto] = ""
                         if justificada:
-                            dados[f"q{i}"], dados[f"obs{i}"], dados[chave_foto] = "Justificado", "", ""
+                            dados[f"q{i}"], dados[f"obs{i}"] = "Justificado", ""
                         else:
                             dados[f"q{i}"] = respostas.get(f"q{i}", "N/A")
                             dados[f"obs{i}"] = observacoes.get(f"obs{i}", "")
-                            arqs = fotos_capturadas.get(chave_foto)
-                            
-                            urls = []
-                            if arqs:
-                                for a in arqs:
-                                    url, erro = processar_upload_imagem(a.getvalue(), a.name)
-                                    if url:
-                                        urls.append(url)
-                                    if erro:
-                                        lista_de_erros.append(f"Erro na Questão {i} ({a.name}): {erro}")
-                                        
-                            dados[chave_foto] = ", ".join([u for u in urls if u])
+                            anexos += [(chave_foto, f"Questão {i}", a) for a in fotos_capturadas.get(chave_foto) or []]
 
                     dados["obs_geral"] = motivo_justificativa if justificada else obs_geral
-                    if not justificada and foto_geral:
-                        urls_g = []
-                        for a in foto_geral:
-                            url_g, erro_g = processar_upload_imagem(a.getvalue(), a.name)
-                            if url_g:
-                                urls_g.append(url_g)
-                            if erro_g:
-                                lista_de_erros.append(f"Erro na Foto Geral ({a.name}): {erro_g}")
-                        dados["foto_geral"] = ", ".join([u for u in urls_g if u])
+                    dados["foto_geral"] = ""
+                    if not justificada:
+                        anexos += [("foto_geral", "Foto Geral", a) for a in foto_geral or []]
+
+                    # Fotos são opcionais: falha de envio não impede a gravação; as não enviadas ficam pendentes de reenvio.
+                    urls_por_campo, enviados, pendentes = enviar_anexos(anexos, pasta)
+                    for campo, urls in urls_por_campo.items():
+                        dados[campo] = ", ".join(urls)
+
+                    try:
+                        salvar_dados(dados)
+                    except Exception:
+                        # salvar_dados já exibe o erro; imagens enviadas são removidas para evitar órfãs.
+                        falha_banco = True
+                        remover_imagens(enviados)
                     else:
-                        dados["foto_geral"] = ""
+                        confirmar_imagens(enviados)
+                        # Estado de conclusão gravado imediatamente após o INSERT, antes de qualquer elemento de UI:
+                        # uma nova execução disparada por clique repetido renderiza a tela de sucesso e não reenvia o formulário.
+                        st.session_state["fotos_pendentes"] = pendentes
+                        st.session_state["registro_salvo"] = {
+                            "data_execucao": dados["data_execucao"], "setor": setor, "cipeiro": cipeiro, "pasta": pasta
+                        }
+                        st.session_state["tela_sucesso"] = True
 
-                    salvar_dados(dados)
-
-                # Salva os erros na memória para a tela seguinte
-                st.session_state["alertas_upload"] = lista_de_erros
-                st.session_state["tela_sucesso"] = True
-                st.rerun()
+                if not falha_banco:
+                    st.rerun()
 
 # ==========================================
 # DASHBOARD E INDICADORES
@@ -272,7 +458,6 @@ elif pagina == "Dashboard de Indicadores":
                 df_meses = df[df['ano'] == ano_sel] if ano_sel != "Todos" else df
                 meses_brutos = df_meses['mes_referencia'].unique().tolist()
                 
-                # Ordenação cronológica
                 ordem_meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
                 meses_disp = sorted(meses_brutos, key=lambda x: ordem_meses.index(x.split('/')[0]) if x.split('/')[0] in ordem_meses else 99)
                 mes_sel = st.selectbox("📆 Filtrar por Mês:", ["Todos"] + meses_disp)
@@ -439,6 +624,7 @@ elif pagina == "Histórico de Dados":
             df_ex['data_execucao'] = pd.to_datetime(df_ex['data_execucao']).dt.strftime('%d/%m/%Y %H:%M')
             st.dataframe(df_ex, use_container_width=True, hide_index=True)
             csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
+            if perfil_atual == "admin":
+                st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
     except Exception as e:
         st.error(f"Erro de processamento: {e}")
