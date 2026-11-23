@@ -117,6 +117,9 @@ st.markdown("""
         h1 {font-size: 26px !important; line-height: 1.2 !important;}
         [data-testid="stSidebar"][data-collapsed="false"] {width: 100vw !important; min-width: 100vw !important; max-width: 100vw !important;}
     }
+    [data-testid="stStatusWidget"] {display: flex; align-items: center; gap: 8px;}
+    [data-testid="stStatusWidget"]::before {content: "Carregando…"; color: var(--c-brand); font-weight: 700; font-size: 14px;}
+    [data-testid="stStatusWidget"] button {display: none !important;}
     [data-testid="stToolbarActions"] {display: none !important;}
     footer {display: none !important;}
     div[data-testid="stFileUploader"] section > div[data-testid="stMarkdownContainer"] {display: none !important;}
@@ -413,7 +416,8 @@ def check_password():
         usuario_digitado = st.text_input("Usuário")
         senha_digitada = st.text_input("Senha", type="password")
         if st.form_submit_button("Entrar", type="primary"):
-            usuario, mensagem = autenticar(usuario_digitado.strip().lower(), senha_digitada)
+            with st.spinner("Verificando acesso... na primeira entrada do dia pode levar alguns segundos."):
+                usuario, mensagem = autenticar(usuario_digitado.strip().lower(), senha_digitada)
             if usuario:
                 iniciar_sessao(usuario)
                 st.rerun()
@@ -666,6 +670,10 @@ def salvar_dados(dados_dict):
                 raise e
 
 def carregar_dados():
+    with st.spinner("Carregando dados..."):
+        return _consultar_inspecoes()
+
+def _consultar_inspecoes():
     query_sql = "SELECT * FROM inspecoes ORDER BY data_execucao DESC"
     max_tentativas = 3
     for tentativa in range(max_tentativas):
@@ -1201,8 +1209,32 @@ elif pagina == "Histórico de Dados":
     try:
         df = carregar_dados()
         if not df.empty:
+            df['data_execucao'] = pd.to_datetime(df['data_execucao'])
+            df['_ano'] = df['mes_referencia'].apply(lambda x: str(x).split('/')[-1] if '/' in str(x) else "Sem Ano")
+            df['_mes'] = df['mes_referencia'].apply(lambda x: str(x).split('/')[0] if '/' in str(x) else "Sem Mês")
+            ordem_meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+            with st.expander("🔎 Filtros", expanded=False):
+                f1, f2 = st.columns(2)
+                with f1:
+                    hist_ano = st.selectbox("Ano:", ["Todos"] + sorted(df['_ano'].unique().tolist(), reverse=True), key="hist_ano")
+                with f2:
+                    hist_mes = st.selectbox("Mês:", ["Todos"] + [m for m in ordem_meses if m in df['_mes'].unique().tolist()], key="hist_mes")
+                hist_setores = st.multiselect("Setor:", sorted(df['setor'].dropna().unique().tolist()), placeholder="Todos", key="hist_setores")
+                hist_cipeiros = st.multiselect("Cipeiro:", sorted(df['cipeiro'].dropna().unique().tolist()), placeholder="Todos", key="hist_cipeiros")
+                hist_status = st.multiselect("Status:", sorted(df['status'].dropna().unique().tolist()), placeholder="Todos", key="hist_status")
+            filtro = pd.Series(True, index=df.index)
+            if hist_ano != "Todos": filtro &= df['_ano'] == hist_ano
+            if hist_mes != "Todos": filtro &= df['_mes'] == hist_mes
+            if hist_setores: filtro &= df['setor'].isin(hist_setores)
+            if hist_cipeiros: filtro &= df['cipeiro'].isin(hist_cipeiros)
+            if hist_status: filtro &= df['status'].isin(hist_status)
+            df = df[filtro].drop(columns=['_ano', '_mes'])
+            st.caption(f"{len(df)} inspeção(ões) encontrada(s).")
+            if df.empty:
+                st.info("Nenhuma inspeção encontrada com os filtros selecionados.")
+                st.stop()
             df_ex = df.copy()
-            df_ex['data_execucao'] = pd.to_datetime(df_ex['data_execucao']).dt.strftime('%d/%m/%Y %H:%M')
+            df_ex['data_execucao'] = df_ex['data_execucao'].dt.strftime('%d/%m/%Y %H:%M')
             st.caption("Deslize a tabela para o lado para ver todas as colunas.")
             nomes_colunas = {
                 "id": "ID", "mes_referencia": "Mês de referência", "setor": "Setor", "responsavel_area": "Responsável da área",
@@ -1213,7 +1245,7 @@ elif pagina == "Histórico de Dados":
                 nomes_colunas.update({f"q{i}": f"Q{i}", f"obs{i}": f"Obs. {i}", f"foto_q{i}": f"Fotos Q{i}"})
             st.dataframe(df_ex.rename(columns=nomes_colunas), width="stretch", hide_index=True)
             csv = df.to_csv(index=False, sep=';', decimal=',', encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 Baixar CSV", csv, 'historico_cipa.csv', 'text/csv')
+            st.download_button("📥 Baixar CSV (filtro atual)", csv, 'historico_cipa.csv', 'text/csv')
     except Exception as e:
         st.error(f"Erro de processamento: {e}")
 
